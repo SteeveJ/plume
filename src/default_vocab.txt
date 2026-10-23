@@ -1,0 +1,94 @@
+# Vocabulaire par défaut pour Whisper (initial_prompt).
+# Éditez ~/.local/share/plume/vocab.txt pour personnaliser.
+# Les lignes commençant par # sont des commentaires et ignorées.
+
+# Prénoms français souvent mal reconnus
+Yves, Yvette, Yvon, Gilles, Gil, Ghislain, Ghislaine,
+Quentin, Corentin, Audrey, Valéry, Valérie, Séverine, Cécile,
+Gwenaëlle, Gaëlle, Gaël, Loïc, François, Françoise,
+Jean, Jeanne, Sylvie, Sylvain, Étienne, Stéphane, Stéphanie,
+Frédéric, Frédérique, Véronique, Dominique, Sébastien, Bastien,
+Guillaume, Bertrand, Renaud, Christophe, Laurent, Laurence,
+Nathalie, Isabelle, Virginie, Théodore, Théo, Maxime, Clément,
+
+# Noms de famille courants
+Dupont, Durand, Martin, Bernard, Leroy, Moreau, Simon, Laurent,
+Lefebvre, Roux, Fournier, Morel, Girard, André, Mercier,
+
+# Outils professionnels
+LinkedIn, Slack, Teams, Zoom, Google Meet, Webex,
+JIRA, Confluence, Notion, Trello, Asana,
+Salesforce, HubSpot, SharePoint, OneDrive, Google Drive,
+
+# Termes business
+devis, facture, TVA, URSSAF, KBIS, SIRET, SIREN,
+DSI, DRH, DAF, RSE, KPI, ROI, OKR, SLA, NDA,
+freelance, portage salarial, auto-entrepreneur,
+compte-rendu, ordre du jour, point d'étape,
+
+# Développement logiciel
+GitHub, GitLab, Bitbucket, Docker, Kubernetes, Helm, Terraform, Ansible,
+Jenkins, GitHub Actions, AWS, Azure, GCP, OVH, Scaleway,
+API, REST, GraphQL, gRPC, WebSocket, OAuth, JWT,
+CI/CD, DevOps, SRE, microservice, monorepo,
+React, Vue.js, Angular, Next.js, Nuxt,
+Django, FastAPI, Flask, Laravel, Spring,
+PostgreSQL, MySQL, SQLite, Redis, MongoDB, Elasticsearch, Kafka,
+Python, Rust, Golang, TypeScript, JavaScript, Kotlin,
+npm, pip, Cargo, Maven, Gradle,
+
+# Intelligence artificielle
+ChatGPT, Claude, Anthropic, OpenAI, Mistral, Llama, Gemini,
+LLM, RAG, fine-tuning, embeddings, tokenizer, prompt,
+Hugging Face, Ollama, LangChain,
+
+# Termes médicaux courants
+ordonnance, échographie, IRM, scanner, bilan sanguin,
+cardiologue, dermatologue, kinésithérapeute, orthopédiste,
+Sécurité Sociale, mutuelle, feuille de soins,
+
+# Marqueurs grammaticaux souvent mal segmentés
+parce que, c'est-à-dire, vis-à-vis, peut-être,
+au-delà, ci-dessous, ci-dessus, bien que, afin que,
+
+# Argot et expressions familières françaises
+# (souvent mal transcrits car non-standard)
+vachement, carrément, franchement, clairement, grave,
+trop bien, trop cool, trop nul, c'est ouf, c'est dingue, c'est chelou,
+chelou, zarbi, relou, ouf, cheum, kiffer, kifer, kiffe, kiffe,
+bolosse, boloss, baltringue, mytho, mythos,
+wesh, ouais, ouaip, bah ouais, nan, p'tit, p'tite,
+t'façon, t'as vu, t'sais, t'inquiète, laisse tomber,
+ça craint, ça déchire, ça dégage, ça gère, c'est galère, la galère,
+faut pas déconner, c'est du lourd, c'est du délire,
+se barrer, se casser, se tirer, se barrer en couille,
+pote, poteau, gars, mec, meuf, nana, keuf, keufs,
+fric, thune, blé, oseille, un billet, une brique,
+bosser, taffer, le taf, le boulot, le tarbouche,
+se planter, se vautrer, foirer, rater, louper,
+kiffer grave, péter les plombs, peter un câble, péter un plomb,
+ça m'énerve, j'en ai marre, j'en peux plus, laisse béton,
+nickel, nickel chrome, impec, tip-top, au poil,
+une clope, fumer une clope, une taffe, une sèche,
+une bagnole, une caisse, une tire, un bahut,
+une baraque, une piaule, un appart, un rade,
+flipper, halluciné, halluciner, kiffer, délirer,
+choper, gauler, chopper, se faire gauler,
+un truc, un machin, un bidule, un truc de ouf,
+en vrai, à donf, à fond, à fond les ballons,
+tellement, trop, grave, énormément, vachement,
+
+# Insultes et jurons français
+# (Whisper les censure souvent ou les remplace par des mots proches)
+merde, putain, bordel, putain de merde, bordel de merde,
+con, connard, connasse, abruti, abrutie, imbécile, idiot,
+salaud, salope, enfoiré, enfoirée, fumier, ordure,
+crétin, crétine, débile, naze, nul, nulle,
+va te faire foutre, va te faire voir, fous-moi la paix,
+ta gueule, ferme-la, la ferme,
+fils de pute, fils de p***, va chier,
+je m'en fous, je m'en branle, j'en ai rien à foutre,
+quel con, quelle conne, quel idiot, quelle idiote,
+c'est de la merde, c'est nul à chier, c'est de la daube,
+se faire emmerder, emmerder, emmerdeur, emmerdeuse,
+couillon, couillonne, trouduc, trou du cul,
