@@ -22,6 +22,12 @@ fn png_to_icon(bytes: &[u8]) -> Option<Icon> {
     Some(Icon { width: w, height: h, data: argb })
 }
 
+/// ksni unwraps the connection to the D-Bus session bus in its own thread and panics when there is none (a server, a container,
+/// a minimal session). `bus_address` is `DBUS_SESSION_BUS_ADDRESS`, `runtime_dir` is `XDG_RUNTIME_DIR` (where the bus socket lives).
+pub fn session_bus_available(bus_address: Option<&str>, runtime_dir: Option<&std::path::Path>) -> bool {
+    bus_address.is_some_and(|a| !a.is_empty()) || runtime_dir.is_some_and(|d| d.join("bus").exists())
+}
+
 static ICON_IDLE: std::sync::OnceLock<Option<Icon>> = std::sync::OnceLock::new();
 static ICON_REC:  std::sync::OnceLock<Option<Icon>> = std::sync::OnceLock::new();
 
@@ -192,6 +198,19 @@ mod tests {
             // `data` is ARGB: the alpha byte is the first of each pixel.
             assert!(icon.data.chunks_exact(4).all(|px| px[0] == 255), "{name} contient des pixels transparents");
         }
+    }
+
+    #[test]
+    fn tray_needs_a_session_bus() {
+        let dir = std::env::temp_dir().join(format!("plume-bus-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(!session_bus_available(None, Some(&dir)), "no address and no socket");
+        assert!(!session_bus_available(Some(""), None));
+        assert!(session_bus_available(Some("unix:path=/run/user/1000/bus"), None));
+        std::fs::write(dir.join("bus"), "").unwrap();
+        assert!(session_bus_available(None, Some(&dir)), "the socket exists");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

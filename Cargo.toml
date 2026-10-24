@@ -26,14 +26,17 @@ cpal = "0.15"
 evdev = "0.12"
 arboard = "3"
 ksni = "0.2"
-llama-cpp-2 = { version = "0.1" }
-rusqlite = "0.31"
+# default-features = false drops OpenMP: the binary then needs no libgomp at run time (ggml uses its own thread pool).
+llama-cpp-2 = { version = "0.1", default-features = false, features = ["common"] }
+# `bundled` compiles SQLite into the binary: no libsqlite3 to install.
+rusqlite = { version = "0.31", features = ["bundled"] }
 hound = "3"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 sha2 = "0.10"
 hex = "0.4"
-notify-rust = { version = "4", default-features = false, features = ["d"] }
+# `z` is the pure-Rust (zbus) D-Bus client: no libdbus to install.
+notify-rust = { version = "4", default-features = false, features = ["z"] }
 atspi = { version = "0.21", default-features = false, features = ["tokio"] }
 futures-util = "0.3"
 gtk4 = "0.9"
@@ -57,6 +60,8 @@ strip = true
 lto = "fat"
 codegen-units = 1
 
-# whisper.cpp and llama.cpp each bundle their own ggml: the vendored copy prefixes whisper's symbols (see its build.rs) so both link into one binary.
+# whisper.cpp and llama.cpp each bundle their own ggml: the vendored whisper-rs-sys prefixes whisper's symbols (see its build.rs) so both link into one binary.
+# audiopus_sys is vendored for one line: it must also search `lib64`, where cmake installs libopus on Fedora, RHEL and openSUSE.
 [patch.crates-io]
 whisper-rs-sys = { path = "vendor/whisper-rs-sys" }
+audiopus_sys = { path = "vendor/audiopus_sys" }

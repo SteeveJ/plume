@@ -276,25 +276,34 @@ mod tests {
         kb / 1024
     }
 
-    /// Test with a real model: `PLUME_TEST_GGML=/path/ggml-tiny.bin cargo test --release -- --ignored whisper_memory`
+    /// Test with a real model: `PLUME_TEST_GGML=/path/ggml-tiny.bin cargo test --release --lib -- --ignored whisper_memory`
     #[tokio::test(flavor = "multi_thread")]
     #[ignore]
     async fn whisper_memory_is_released_on_unload_and_restored_by_warm() {
         let model = std::env::var("PLUME_TEST_GGML").expect("set PLUME_TEST_GGML");
+        let base = rss_mb();
         let w = WhisperCpp::load(std::path::Path::new(&model), "en", crate::adapters::stt::new_shared_vocab("")).unwrap();
         let silence = AudioSamples::new(vec![0.0; 16_000 * 3], 16_000, 1);
-        let heard = w.transcribe(&silence).await.unwrap().text; assert_eq!(heard, "", "le silence ne doit rien produire, entendu {heard:?}");
+        // On pure silence some models invent a phrase ("Thank you."): the dictation service drops it upstream. A tag must never get through.
+        let heard = w.transcribe(&silence).await.unwrap().text;
+        assert!(!heard.contains('[') && !heard.contains('('), "tag not filtered: {heard:?}");
         let loaded = rss_mb();
 
         w.unload();
         let unloaded = rss_mb();
         assert!(!w.is_loaded());
-        assert!(unloaded + 30 < loaded, "la RAM doit baisser après le déchargement ({loaded} Mo -> {unloaded} Mo)");
+        // On the CPU the weights live in RAM, so unloading must give it back. In a GPU build they live in VRAM and RAM barely moves.
+        // The GPU build's CUDA context keeps its ~560 MB of host memory after unloading (the weights, in VRAM, are freed).
+        if !cfg!(any(feature = "cuda", feature = "vulkan")) && loaded > base + 150 {
+            assert!(unloaded + 30 < loaded, "RAM must drop after unloading ({loaded} MB -> {unloaded} MB)");
+        } else {
+            assert!(unloaded <= loaded + 30, "unloading must not grow RAM ({loaded} MB -> {unloaded} MB)");
+        }
 
         w.warm();
         for _ in 0..100 { if w.is_loaded() { break; } std::thread::sleep(Duration::from_millis(100)); }
-        assert!(w.is_loaded(), "warm() doit recharger le modèle");
+        assert!(w.is_loaded(), "warm() must reload the model");
         w.warm(); // already loaded: must neither pile up nor block
-        assert_eq!(w.transcribe(&silence).await.unwrap().text, "");
+        assert!(w.transcribe(&silence).await.is_ok());
     }
 }

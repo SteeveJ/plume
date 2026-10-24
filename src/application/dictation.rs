@@ -21,7 +21,7 @@ use crate::domain::ports::{
     stt::SpeechToText,
 };
 use crate::adapters::stt::SharedVocab;
-use super::hallucination;
+use super::{fidelity, hallucination};
 use super::snippets::{self, Snippet};
 
 const CHUNK_CHARS: usize = 350;
@@ -64,12 +64,6 @@ fn split_chunks(text: &str) -> Vec<&str> {
     let last = text[start..].trim();
     if !last.is_empty() || chunks.is_empty() { chunks.push(last); }
     chunks
-}
-
-/// True if the output lost more than 10 % of the words: the "clean" prompt asks to preserve the exact words (ignored under 12 words).
-fn lost_content(input: &str, output: &str) -> bool {
-    let (a, b) = (input.split_whitespace().count(), output.split_whitespace().count());
-    a >= 12 && b * 10 < a * 9
 }
 
 pub struct DictationService<R, S, I> {
@@ -346,7 +340,7 @@ where
         }
     }
 
-    /// Corrects in chunks (a small LLM skips passages on long texts) and keeps a chunk's raw text if the correction loses content.
+    /// Corrects in chunks (a small LLM skips passages on long texts) and keeps a chunk's raw text if the correction is empty or changes a word.
     async fn run_processor(&self, p: &dyn TextProcessor, raw: &str, ctx: Option<&str>) -> String {
         let chunks = if self.content_guard { split_chunks(raw) } else { vec![raw.trim()] };
         let mut out = Vec::with_capacity(chunks.len());
@@ -358,8 +352,8 @@ where
                 _ => chunk.to_string(),
             };
             match p.process(&input).await {
-                Ok(t) if !t.trim().is_empty() && !(self.content_guard && lost_content(chunk, &t)) => out.push(t),
-                Ok(_) => { tracing::warn!("processor returned empty or shortened text, keeping raw chunk"); out.push(chunk.to_string()); }
+                Ok(t) if !t.trim().is_empty() && (!self.content_guard || fidelity::is_faithful(chunk, &t)) => out.push(t),
+                Ok(_) => { tracing::warn!("processor returned nothing or changed words, keeping the raw chunk"); out.push(chunk.to_string()); }
                 Err(e) => { tracing::warn!("processor error: {e}"); out.push(chunk.to_string()); }
             }
         }
@@ -644,15 +638,6 @@ mod tests {
     }
 
     #[test]
-    fn lost_content_ignores_short_texts_and_flags_big_drops() {
-        assert!(!lost_content("euh je veux ça", "je veux ça"));
-        let long = "mot ".repeat(30);
-        assert!(lost_content(&long, &"mot ".repeat(20)));
-        assert!(lost_content(&long, &"mot ".repeat(26)));
-        assert!(!lost_content(&long, &"mot ".repeat(28)));
-    }
-
-    #[test]
     fn empty_processor_output_never_erases_the_dictation() {
         let mut rec = MockAudioRecorder::new();
         rec.expect_start().returning(|| Ok(()));
@@ -664,6 +649,26 @@ mod tests {
         proc.expect_process().returning(|_| Ok("  ".into()));
         let mut inj = MockTextInjector::new();
         inj.expect_inject().with(eq("salut jean")).times(1).returning(|_| Ok(()));
+        let mut notifier = MockNotifier::new();
+        notifier.expect_notify().return_const(());
+        let mut svc = DictationService::new(rec, stt, inj, Some(Box::new(proc)), Box::new(notifier));
+        run(&mut svc, vec![HotkeyEvent::RecordStart, HotkeyEvent::RecordStop]);
+    }
+
+    #[test]
+    fn processor_that_changes_a_word_falls_back_to_raw() {
+        // The real defect: a 0.6B model "corrected" fallu into fallé on CPU.
+        let raw = "il a fallu que je ramene les enfants avant la nuit";
+        let mut rec = MockAudioRecorder::new();
+        rec.expect_start().returning(|| Ok(()));
+        rec.expect_stop().returning(|| Ok(samples(1.0)));
+        let mut stt = MockSpeechToText::new();
+        stt.expect_warm().return_const(());
+        stt.expect_transcribe().returning(move |_| Ok(Transcription { text: raw.into(), ..Default::default() }));
+        let mut proc = MockTextProcessor::new();
+        proc.expect_process().returning(|_| Ok("Il a fallé que je ramène les enfants avant la nuit.".into()));
+        let mut inj = MockTextInjector::new();
+        inj.expect_inject().with(eq(raw)).times(1).returning(|_| Ok(()));
         let mut notifier = MockNotifier::new();
         notifier.expect_notify().return_const(());
         let mut svc = DictationService::new(rec, stt, inj, Some(Box::new(proc)), Box::new(notifier));
@@ -698,16 +703,16 @@ mod tests {
         let mut stt = MockSpeechToText::new();
         stt.expect_warm().return_const(());
         stt.expect_transcribe()
-            .returning(|_| Ok(Transcription { text: "raw text".into(), ..Default::default() }));
+            .returning(|_| Ok(Transcription { text: "hello world".into(), ..Default::default() }));
 
         let mut proc = MockTextProcessor::new();
         proc.expect_process()
-            .with(eq("raw text"))
-            .returning(|_| Ok("Cleaned text.".into()));
+            .with(eq("hello world"))
+            .returning(|_| Ok("Hello, world.".into()));
 
         let mut inj = MockTextInjector::new();
         inj.expect_inject()
-            .with(eq("Cleaned text."))
+            .with(eq("Hello, world."))
             .returning(|_| Ok(()));
 
         let mut notifier = MockNotifier::new();

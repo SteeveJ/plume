@@ -109,9 +109,9 @@ async fn load_local_whisper(cfg: &AppConfig, vocab: adapters::stt::SharedVocab) 
     let size_mb = std::fs::metadata(&path)?.len() / 1_048_576;
     let available = sysmem::available_mb();
     anyhow::ensure!(
-        sysmem::model_fits(size_mb, 19, available),
+        sysmem::model_fits(size_mb, sysmem::speech_model_ram_factor_tenths(), available),
         "the speech model '{}' needs about {} MB of free RAM but only {} MB are available — choose a smaller STT_MODEL (for example base or small-q8_0) in Settings, or free some memory",
-        cfg.stt_model, sysmem::required_mb(size_mb, 19), available.unwrap_or(0)
+        cfg.stt_model, sysmem::required_mb(size_mb, sysmem::speech_model_ram_factor_tenths()), available.unwrap_or(0)
     );
     let whisper = WhisperCpp::load(&path, &cfg.stt_lang, vocab)?;
 
@@ -264,7 +264,12 @@ async fn run() -> Result<()> {
         processor_label,
     });
     let tray_handle = tray_service.handle();
-    tray_service.spawn();
+    let runtime_dir = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from);
+    if tray::session_bus_available(std::env::var("DBUS_SESSION_BUS_ADDRESS").ok().as_deref(), runtime_dir.as_deref()) {
+        tray_service.spawn();
+    } else {
+        tracing::warn!("no D-Bus session bus: running without the tray icon");
+    }
 
     // channel: DictationService → tray update thread
     let (state_tx, state_rx) = mpsc::sync_channel::<bool>(8);
