@@ -30,8 +30,8 @@ impl OpenAiWhisper {
         let spec = WavSpec {
             channels: 1,
             sample_rate: audio.sample_rate,
-            bits_per_sample: 32,
-            sample_format: SampleFormat::Float,
+            bits_per_sample: 16,
+            sample_format: SampleFormat::Int,
         };
         let mut buf = Cursor::new(Vec::new());
         let mut writer = WavWriter::new(&mut buf, spec)?;
@@ -39,7 +39,7 @@ impl OpenAiWhisper {
         let step = audio.channels as usize;
         for chunk in audio.samples.chunks(step) {
             let mono = chunk.iter().sum::<f32>() / step as f32;
-            writer.write_sample(mono)?;
+            writer.write_sample((mono.clamp(-1.0, 1.0) * 32767.0) as i16)?;
         }
         writer.finalize()?;
         Ok(buf.into_inner())

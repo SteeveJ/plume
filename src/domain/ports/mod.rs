@@ -6,3 +6,4 @@ pub mod processor;
 pub mod history;
 pub mod notifier;
 pub mod scratchpad;
+pub mod context;

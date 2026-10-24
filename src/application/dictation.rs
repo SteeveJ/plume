@@ -11,6 +11,7 @@ use crate::config::{OutputMode, UiLang};
 use crate::domain::model::HotkeyEvent;
 use crate::domain::ports::{
     audio::AudioRecorder,
+    context::ContextReader,
     history::HistoryStore,
     injector::TextInjector,
     notifier::Notifier,
@@ -25,6 +26,7 @@ pub struct DictationService<R, S, I> {
     stt: S,
     injector: I,
     processor: Option<Box<dyn TextProcessor>>,
+    context_reader: Option<Box<dyn ContextReader>>,
     history: Option<Box<dyn HistoryStore>>,
     notifier: Box<dyn Notifier>,
     scratchpad: Option<Box<dyn ScratchpadWriter>>,
@@ -49,6 +51,7 @@ where
     ) -> Self {
         Self {
             recorder, stt, injector, processor,
+            context_reader: None,
             notifier,
             history: None,
             scratchpad: None,
@@ -59,6 +62,7 @@ where
         }
     }
 
+    pub fn with_context_reader(mut self, r: Box<dyn ContextReader>) -> Self { self.context_reader = Some(r); self }
     pub fn with_history(mut self, h: Box<dyn HistoryStore>) -> Self { self.history = Some(h); self }
     pub fn with_scratchpad(mut self, s: Box<dyn ScratchpadWriter>) -> Self { self.scratchpad = Some(s); self }
     pub fn with_state_tx(mut self, tx: SyncSender<bool>) -> Self { self.state_tx = Some(tx); self }
@@ -152,8 +156,16 @@ where
             })
         });
 
+        let ctx = self.context_reader.as_ref().and_then(|cr| cr.get_context());
+        let processor_input: std::borrow::Cow<str> = match &ctx {
+            Some(c) if self.processor.is_some() => std::borrow::Cow::Owned(format!(
+                "[Context before cursor — use for tone, do NOT include in output]:\n{c}\n\n[Dictated text to correct]:\n{raw}"
+            )),
+            _ => std::borrow::Cow::Borrowed(&raw),
+        };
+
         let text = match &self.processor {
-            Some(p) => match p.process(&raw).await {
+            Some(p) => match p.process(&processor_input).await {
                 Ok(t) => t,
                 Err(e) => { tracing::warn!("processor error: {e}"); raw.clone() }
             },

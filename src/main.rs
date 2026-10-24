@@ -11,6 +11,7 @@ use std::{path::PathBuf, sync::mpsc, thread};
 use application::dictation::DictationService;
 use adapters::{
     audio::CpalRecorder,
+    context::AtspiContext,
     history::SqliteHistory,
     stt::{OpenAiWhisper, LocalWhisper, new_shared_vocab},
     injector::EnigoInjector,
@@ -311,6 +312,8 @@ async fn main() -> Result<()> {
         .map_err(|e| tracing::warn!("history unavailable: {e}"))
         .ok();
 
+    let atspi_ctx = AtspiContext::spawn().await;
+
     let recorder = CpalRecorder::new().context("init audio recorder")?;
     let injector = EnigoInjector::new().context("init text injector")?;
 
@@ -335,6 +338,7 @@ async fn main() -> Result<()> {
         .with_ui_lang(cfg.ui_lang)
         .with_vocab(vocab);
     if let Some(h) = history { service = service.with_history(h); }
+    if let Some(ctx) = atspi_ctx { service = service.with_context_reader(Box::new(ctx)); }
 
     service.run(rx).await
 }

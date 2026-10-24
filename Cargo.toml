@@ -35,6 +35,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 sha2 = "0.10"
 hex = "0.4"
 notify-rust = { version = "4", default-features = false, features = ["d"] }
+atspi = { version = "0.21", default-features = false, features = ["tokio"] }
+futures-util = "0.3"
 gtk4 = "0.9"
 png = "0.17"
 
