@@ -18,9 +18,11 @@ impl AudioSamples {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Transcription {
     pub text: String,
+    /// Un détecteur de voix a confirmé de la parole humaine dans l'audio (faux pour les moteurs qui n'en ont pas).
+    pub speech_confirmed: bool,
 }
 
 #[derive(Debug, Clone)]

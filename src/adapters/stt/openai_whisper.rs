@@ -67,6 +67,6 @@ impl SpeechToText for OpenAiWhisper {
         let body: serde_json::Value = resp.json().await?;
         let text = body["text"].as_str().unwrap_or("").trim().to_string();
 
-        Ok(Transcription { text })
+        Ok(Transcription { text, ..Default::default() })
     }
 }

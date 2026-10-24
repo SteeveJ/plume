@@ -26,18 +26,24 @@ impl AudioRecorder for FakeMic {
 }
 
 /// Whisper simulé qui répond toujours `says`, en comptant les appels.
-pub struct FakeStt { pub says: &'static str, pub calls: Arc<AtomicUsize> }
+pub struct FakeStt { pub says: &'static str, pub calls: Arc<AtomicUsize>, pub confirmed: bool }
 impl FakeStt {
     pub fn new(says: &'static str) -> (Self, Arc<AtomicUsize>) {
         let calls = Arc::new(AtomicUsize::new(0));
-        (Self { says, calls: calls.clone() }, calls)
+        (Self { says, calls: calls.clone(), confirmed: false }, calls)
+    }
+    /// Comme Whisper avec le détecteur de voix : il a confirmé de la parole dans l'audio.
+    pub fn confirmed(says: &'static str) -> (Self, Arc<AtomicUsize>) {
+        let (mut s, calls) = Self::new(says);
+        s.confirmed = true;
+        (s, calls)
     }
 }
 #[async_trait]
 impl SpeechToText for FakeStt {
     async fn transcribe(&self, _: &AudioSamples) -> Result<Transcription> {
         self.calls.fetch_add(1, Ordering::SeqCst);
-        Ok(Transcription { text: self.says.into() })
+        Ok(Transcription { text: self.says.into(), speech_confirmed: self.confirmed })
     }
 }
 

@@ -22,11 +22,12 @@ fn normalize(text: &str) -> String {
 }
 
 /// Vrai si `text` n'est pas de la parole : de la ponctuation seule (« . », « ... ») quel que soit le volume,
-/// ou une phrase inventée sur un audio faible. Une phrase légitime au même texte, dite à voix normale, passe.
-pub fn is_hallucination(text: &str, rms: f32) -> bool {
+/// ou une phrase inventée sur un audio faible. Une phrase légitime au même texte, dite à voix normale, passe,
+/// et aussi à voix basse quand un détecteur de voix a confirmé de la parole (`speech_confirmed`, ADR 0014).
+pub fn is_hallucination(text: &str, rms: f32, speech_confirmed: bool) -> bool {
     let norm = normalize(text);
     if !text.chars().any(|c| c.is_alphanumeric()) { return true; }
-    rms < QUIET_RMS && INVENTED.contains(&norm.as_str())
+    !speech_confirmed && rms < QUIET_RMS && INVENTED.contains(&norm.as_str())
 }
 
 #[cfg(test)]
@@ -40,30 +41,37 @@ mod tests {
     fn real_whisper_outputs_on_noise_are_dropped() {
         for t in ["Thank you.", "Thank You!", " thank you ", ".", "...", "Sous-titrage Société Radio-Canada",
                   "Merci.", "Subtitles by the Amara.org community", "you"] {
-            assert!(is_hallucination(t, NOISE), "{t:?}");
+            assert!(is_hallucination(t, NOISE, false), "{t:?}");
         }
     }
 
     #[test]
     fn french_accents_and_capitals_are_matched() {
         for t in ["Merci À Tous !", "MERCI D'AVOIR REGARDÉ CETTE VIDÉO.", "À bientôt", "Sous-titres réalisés par la communauté d'Amara.org"] {
-            assert!(is_hallucination(t, NOISE), "{t:?}");
+            assert!(is_hallucination(t, NOISE, false), "{t:?}");
         }
     }
 
     #[test]
     fn the_same_words_said_aloud_are_kept_except_pure_punctuation() {
         for t in ["Thank you.", "Merci.", "Au revoir !"] {
-            assert!(!is_hallucination(t, VOICE), "{t:?}");
+            assert!(!is_hallucination(t, VOICE, false), "{t:?}");
         }
-        assert!(is_hallucination(".", VOICE), "de la ponctuation seule n'est jamais de la parole");
-        assert!(is_hallucination("…", VOICE));
+        assert!(is_hallucination(".", VOICE, false), "de la ponctuation seule n'est jamais de la parole");
+        assert!(is_hallucination("…", VOICE, false));
+    }
+
+    #[test]
+    fn a_confirmed_voice_keeps_even_the_phrases_whisper_likes_to_invent() {
+        assert!(!is_hallucination("Merci.", NOISE, true), "un « merci » très bas confirmé par le détecteur de voix");
+        assert!(!is_hallucination("Thank you.", NOISE, true));
+        assert!(is_hallucination(".", NOISE, true), "de la ponctuation seule reste écartée même confirmée");
     }
 
     #[test]
     fn quiet_but_real_sentences_are_kept() {
         for t in ["Ouvre le rapport de jeudi", "thank you for the report", "Merci Jean, à demain"] {
-            assert!(!is_hallucination(t, NOISE), "{t:?}");
+            assert!(!is_hallucination(t, NOISE, false), "{t:?}");
         }
     }
 

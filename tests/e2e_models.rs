@@ -1,5 +1,5 @@
 //! Non-régression avec de vrais modèles (ignorés par défaut, ils sont gros) :
-//!   PLUME_TEST_GGML=/chemin/ggml-tiny.bin PLUME_TEST_GGUF=/chemin/model.gguf \
+//!   PLUME_TEST_GGML=/chemin/ggml-tiny.bin PLUME_TEST_GGUF=/chemin/model.gguf [PLUME_TEST_VAD=/chemin/ggml-silero-v5.1.2.bin] \
 //!     cargo test --release --test e2e_models -- --ignored
 //! Ajouter `--features cuda` pour tester le GPU. Ce test attrape ce que la compilation ne voit pas :
 //! whisper.cpp et llama.cpp ont chacun leur ggml, et un conflit de symboles ne plante qu'à l'exécution.
@@ -62,16 +62,22 @@ async fn real_whisper_noise_is_filtered_and_real_speech_is_kept() {
     assert!(speech_rms > plume::application::hallucination::QUIET_RMS, "la voix de référence doit être au-dessus du seuil ({speech_rms})");
 
     for lang in ["fr", "en", ""] {
-        let whisper = WhisperCpp::load(&env_path("PLUME_TEST_GGML"), lang, new_shared_vocab("")).unwrap();
+        let mut whisper = WhisperCpp::load(&env_path("PLUME_TEST_GGML"), lang, new_shared_vocab("")).unwrap();
+        let with_vad = std::env::var("PLUME_TEST_VAD").ok();
+        if let Some(v) = &with_vad { whisper = whisper.with_vad(std::path::Path::new(v)); }
         for (name, samples) in &noises {
             let rms = common::rms(samples);
-            let said = whisper.transcribe(&AudioSamples::new(samples.clone(), 16_000, 1)).await.unwrap().text;
-            let kept = !said.is_empty() && !is_hallucination(&said, rms);
-            assert!(!kept, "langue {lang:?}, {name} : {said:?} atteindrait le clavier — l'ajouter à INVENTED si c'est une vraie hallucination");
+            let heard = whisper.transcribe(&AudioSamples::new(samples.clone(), 16_000, 1)).await.unwrap();
+            let kept = !heard.text.is_empty() && !is_hallucination(&heard.text, rms, heard.speech_confirmed);
+            assert!(!kept, "langue {lang:?}, {name} : {:?} atteindrait le clavier — l'ajouter à INVENTED si c'est une vraie hallucination", heard.text);
+            if with_vad.is_some() {
+                assert!(heard.text.is_empty() && !heard.speech_confirmed, "langue {lang:?}, {name} : le détecteur de voix aurait dû écarter ce bruit, Whisper a dit {:?}", heard.text);
+            }
         }
         // Avec la langue forcée sur le français, Whisper traduit le discours anglais : on cherche donc le mot dans la bonne langue.
-        let said = whisper.transcribe(&speech).await.unwrap().text;
+        let heard = whisper.transcribe(&speech).await.unwrap();
         let expected = if lang == "fr" { "pays" } else { "your country" };
-        assert!(!is_hallucination(&said, speech_rms) && said.to_lowercase().contains(expected), "langue {lang:?}, parole : {said:?}");
+        assert!(!is_hallucination(&heard.text, speech_rms, heard.speech_confirmed) && heard.text.to_lowercase().contains(expected), "langue {lang:?}, parole : {:?}", heard.text);
+        assert_eq!(heard.speech_confirmed, with_vad.is_some(), "langue {lang:?} : la parole est confirmée avec le détecteur de voix, et seulement avec lui");
     }
 }

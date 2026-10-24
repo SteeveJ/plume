@@ -1,9 +1,13 @@
 use async_trait::async_trait;
 use anyhow::{Context, Result};
-use std::path::PathBuf;
+use std::ops::Range;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperState};
+use whisper_rs::{
+    FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperState, WhisperVadContext,
+    WhisperVadContextParams, WhisperVadParams,
+};
 use crate::domain::model::{AudioSamples, Transcription};
 use crate::domain::ports::stt::SpeechToText;
 use super::audio_util::to_mono_16k;
@@ -18,11 +22,22 @@ pub fn ggml_url(file: &str) -> String {
     format!("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{file}")
 }
 
+/// Détecteur de voix Silero (moins de 1 Mo) : distingue la parole du bruit avant Whisper (ADR 0014).
+pub const VAD_FILE: &str = "ggml-silero-v5.1.2.bin";
+
+pub fn vad_url() -> String {
+    format!("https://huggingface.co/ggml-org/whisper-vad/resolve/main/{VAD_FILE}")
+}
+
+/// Marge gardée autour de la parole détectée : 0,25 s, pour ne pas couper le début ni la fin des mots.
+const VAD_PAD: usize = 4_000;
+
 /// Le modèle (+ tampons de calcul, ~0,6 à 0,9 Go pour `small`) est libéré après cette durée sans dictée.
 const IDLE_UNLOAD: Duration = Duration::from_secs(300);
 
 struct Loaded {
     state: WhisperState,
+    vad: Option<WhisperVadContext>,
     last_used: Instant,
 }
 
@@ -31,6 +46,7 @@ struct Inner {
     lang: String,
     prompt: SharedVocab,
     threads: i32,
+    vad_path: Mutex<Option<PathBuf>>,
     loaded: Mutex<Option<Loaded>>,
 }
 
@@ -41,9 +57,34 @@ impl Inner {
         let ctx = WhisperContext::new_with_params(path, WhisperContextParameters::default())
             .with_context(|| format!("load whisper model {}", self.model_path.display()))?;
         let state = ctx.create_state().context("whisper state")?;
-        *slot = Some(Loaded { state, last_used: Instant::now() });
+        let vad = self.vad_path.lock().unwrap().as_deref().and_then(load_vad);
+        *slot = Some(Loaded { state, vad, last_used: Instant::now() });
         Ok(())
     }
+}
+
+/// Sans détecteur de voix Plume reste utilisable : les filtres de volume et de phrases inventées prennent le relais.
+fn load_vad(path: &Path) -> Option<WhisperVadContext> {
+    let mut params = WhisperVadContextParams::new();
+    params.set_use_gpu(false);
+    WhisperVadContext::new(path.to_str()?, params)
+        .map_err(|e| tracing::warn!("voice detector {} unavailable ({e}), continuing without it", path.display()))
+        .ok()
+}
+
+/// Zone de parole (en centisecondes, telle que la rend le détecteur) élargie de `VAD_PAD` échantillons, bornée à l'audio.
+fn padded_range(first_start_cs: f32, last_end_cs: f32, len: usize) -> Range<usize> {
+    let to_samples = |cs: f32| (cs.max(0.0) * 160.0) as usize;
+    to_samples(first_start_cs).saturating_sub(VAD_PAD).min(len)..(to_samples(last_end_cs) + VAD_PAD).min(len)
+}
+
+/// `None` = aucune parole dans l'audio.
+fn detect_speech(vad: &mut WhisperVadContext, pcm: &[f32]) -> Result<Option<Range<usize>>> {
+    let segments = vad.segments_from_samples(WhisperVadParams::new(), pcm).context("voice detection")?;
+    let n = segments.num_segments();
+    if n == 0 { return Ok(None); }
+    let (first, last) = (segments.get_segment(0), segments.get_segment(n - 1));
+    Ok(first.zip(last).map(|(f, l)| padded_range(f.start, l.end, pcm.len())))
 }
 
 /// Whisper en processus (whisper.cpp) : aucun Python ni serveur externe.
@@ -59,6 +100,7 @@ impl WhisperCpp {
             lang: lang.into(),
             prompt,
             threads: compute_threads(std::thread::available_parallelism().map_or(4, |n| n.get())),
+            vad_path: Mutex::new(None),
             loaded: Mutex::new(None),
         });
         inner.ensure_loaded(&mut inner.loaded.lock().unwrap())?;
@@ -74,6 +116,16 @@ impl WhisperCpp {
             }
         });
         Ok(Self { inner })
+    }
+
+    /// Active le détecteur de voix : sans parole dans l'audio, Whisper n'est pas appelé (donc rien d'inventé) ;
+    /// sinon seule la zone de parole lui est envoyée.
+    pub fn with_vad(self, vad_model: &Path) -> Self {
+        *self.inner.vad_path.lock().unwrap() = Some(vad_model.to_path_buf());
+        if let Some(loaded) = self.inner.loaded.lock().unwrap().as_mut() {
+            loaded.vad = load_vad(vad_model);
+        }
+        self
     }
 
     #[cfg(test)]
@@ -115,6 +167,17 @@ impl Inner {
         self.ensure_loaded(&mut slot)?;
         let loaded = slot.as_mut().expect("loaded");
 
+        let (pcm, speech_confirmed) = match loaded.vad.as_mut().map(|v| detect_speech(v, pcm)) {
+            Some(Ok(Some(range))) => (&pcm[range], true),
+            Some(Ok(None)) => {
+                tracing::debug!("voice detector: no speech in the audio, skipping Whisper");
+                loaded.last_used = Instant::now();
+                return Ok(Transcription::default());
+            }
+            Some(Err(e)) => { tracing::warn!("voice detector failed, using the whole audio: {e:#}"); (pcm, false) }
+            None => (pcm, false),
+        };
+
         let mut p = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
         // "auto" = détection de la langue ; sans lui whisper.cpp suppose l'anglais.
         p.set_language(Some(if self.lang.is_empty() { "auto" } else { &self.lang }));
@@ -140,9 +203,9 @@ impl Inner {
         // Whisper marque le silence/bruit par un no_speech_prob élevé : on écarte ces hallucinations.
         if n > 0 && no_speech / n as f32 > 0.6 {
             tracing::debug!("whisper: no_speech_prob={:.2} — discarding as silence/noise", no_speech / n as f32);
-            return Ok(Transcription { text: String::new() });
+            return Ok(Transcription::default());
         }
-        Ok(Transcription { text: text.trim().to_string() })
+        Ok(Transcription { text: text.trim().to_string(), speech_confirmed })
     }
 }
 
@@ -179,6 +242,21 @@ mod tests {
         for speech in ["Hello world.", " Bonjour (enfin) tout le monde", "Le prix est [35] euros, ok"] {
             assert!(!is_non_speech_tag(speech), "{speech:?}");
         }
+    }
+
+    #[test]
+    fn voice_detector_is_downloaded_from_the_silero_file() {
+        assert!(vad_url().starts_with("https://huggingface.co/ggml-org/whisper-vad/"));
+        assert!(vad_url().ends_with(VAD_FILE) && VAD_FILE.contains("silero"));
+    }
+
+    #[test]
+    fn speech_zone_is_padded_and_never_leaves_the_audio() {
+        // Parole de 1,0 s à 2,0 s (centisecondes 100 à 200) dans 5 s d'audio : 0,25 s de marge de chaque côté.
+        assert_eq!(padded_range(100.0, 200.0, 80_000), 12_000..36_000);
+        assert_eq!(padded_range(5.0, 380.0, 64_000), 0..64_000, "bornée au début et à la fin");
+        assert_eq!(padded_range(-3.0, 10.0, 64_000), 0..5_600);
+        assert!(padded_range(100.0, 200.0, 0).is_empty());
     }
 
     #[test]

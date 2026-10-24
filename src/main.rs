@@ -113,7 +113,16 @@ async fn load_local_whisper(cfg: &AppConfig, vocab: adapters::stt::SharedVocab) 
         "the speech model '{}' needs about {} MB of free RAM but only {} MB are available — choose a smaller STT_MODEL (for example base or small-q8_0) in Settings, or free some memory",
         cfg.stt_model, sysmem::required_mb(size_mb, 19), available.unwrap_or(0)
     );
-    WhisperCpp::load(&path, &cfg.stt_lang, vocab)
+    let whisper = WhisperCpp::load(&path, &cfg.stt_lang, vocab)?;
+
+    // Détecteur de voix (moins de 1 Mo) : s'il manque, Plume continue avec ses filtres de volume.
+    let vad = data_dir().join(adapters::stt::whisper_cpp::VAD_FILE);
+    if !vad.exists() {
+        if let Err(e) = download_model(&vad, &adapters::stt::whisper_cpp::vad_url(), None).await {
+            tracing::warn!("voice detector not downloaded ({e:#}), continuing without it");
+        }
+    }
+    Ok(if vad.exists() { whisper.with_vad(&vad) } else { whisper })
 }
 
 fn install_autostart() -> Result<()> {

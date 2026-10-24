@@ -67,7 +67,7 @@ async fn main() {
     for &secs in &[2.0f32, 5.0, 10.0, 20.0, 30.0] {
         let audio = make_audio(secs);
         let t = Instant::now();
-        let result = whisper.transcribe(&audio).await.unwrap_or(plume::domain::model::Transcription { text: String::new() });
+        let result = whisper.transcribe(&audio).await.unwrap_or(plume::domain::model::Transcription::default());
         let d = t.elapsed();
         print_row(&format!("STT warm — {secs:>4.0}s audio   → {:>3} chars", result.text.len()), d);
     }

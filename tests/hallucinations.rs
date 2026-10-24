@@ -64,6 +64,22 @@ fn the_same_phrases_are_kept_when_the_user_really_speaks() {
 }
 
 #[test]
+fn a_quiet_merci_is_typed_when_the_voice_detector_confirmed_speech() {
+    // Même audio faible, même texte que « bruit + Merci » (écarté) : seule la confirmation du détecteur de voix change tout.
+    let (stt, _) = FakeStt::confirmed("Merci.");
+    let (typed, notes) = (Typed::default(), Notes::default());
+    let mut svc = DictationService::new(FakeMic::one(white_noise(0.01)), stt, typed.clone(), None, Box::new(notes.clone()));
+    dictate(&mut svc, 1);
+    assert_eq!(typed.texts(), vec!["Merci.".to_string()], "{}", notes.all());
+    // Une ponctuation seule reste écartée même confirmée.
+    let (stt, _) = FakeStt::confirmed(".");
+    let (typed, _) = (Typed::default(), ());
+    let mut svc = DictationService::new(FakeMic::one(white_noise(0.01)), stt, typed.clone(), None, Box::new(Notes::default()));
+    dictate(&mut svc, 1);
+    assert!(typed.texts().is_empty());
+}
+
+#[test]
 fn quiet_but_real_speech_is_not_mistaken_for_noise() {
     // Voix basse (RMS 0,01) mais phrase réelle : seules les phrases inventées connues sont filtrées.
     run_case(Case { name: "voix basse", mic: FakeMic::one(white_noise(0.01)), whisper_says: "Ouvre le rapport de jeudi",
@@ -77,7 +93,7 @@ fn noise_then_speech_in_the_same_session_types_only_the_speech() {
     impl SpeechToText for Scripted {
         async fn transcribe(&self, _: &plume::domain::model::AudioSamples) -> anyhow::Result<plume::domain::model::Transcription> {
             self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            Ok(plume::domain::model::Transcription { text: self.0.lock().unwrap().remove(0).into() })
+            Ok(plume::domain::model::Transcription { text: self.0.lock().unwrap().remove(0).into(), ..Default::default() })
         }
     }
     let mic = FakeMic { fail: false, takes: [white_noise(0.01), muted(), voice()].into() };

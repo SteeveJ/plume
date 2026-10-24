@@ -138,8 +138,10 @@ OLLAMA_MODEL=qwen3:0.6b
   - `cargo test --lib` : unitaires, sans modèle ni matériel.
   - `cargo test --test config_load --test pipeline --test hallucinations` : non-régression avec les vrais adaptateurs (fichier de config réel dans un HOME temporaire ; chaîne parole → LLM → snippets → historique → clavier avec faux micro/clavier). Chaque test correspond à un bug réel déjà rencontré.
   - `PLUME_TEST_GGML=… PLUME_TEST_GGUF=… cargo test --release --test e2e_models -- --ignored` (+ `--features cuda`) : vrais modèles, Whisper et Qwen dans le même processus. Seul test qui attrape un conflit de symboles ggml à l'exécution.
+  - `PLUME_TEST_GGUF=… cargo test --release --test e2e_llm_eval -- --ignored --nocapture` : note un LLM de correction (0 vide, 0 mot changé, ≥ 8/12 bien formées) ; à relancer avant de changer de modèle ou de prompt.
   - `PLUME_TEST_GGML=… cargo test --release --lib -- --ignored` : libération de la RAM au déchargement de Whisper.
 - `plume --restart` arrête l'ancien démon puis relance le programme courant (utilisé par le tray et les réglages).
+- Détecteur de voix (ADR 0014) : `WhisperCpp::with_vad`, fichier `ggml-silero-v5.1.2.bin` ; sans parole détectée Whisper n'est pas appelé, avec parole confirmée la règle des phrases inventées est levée. Tests : `PLUME_TEST_VAD=… cargo test --release --test e2e_models --test e2e_french -- --ignored`.
 - Hallucinations : toute phrase que Whisper invente sur du bruit doit être ajoutée à `INVENTED` (`application/hallucination.rs`) avec le cas correspondant dans `tests/hallucinations.rs`. Le test `e2e_models` rejoue du bruit réel et montre les nouvelles phrases après un changement de modèle.
 
 ## Documentation

@@ -186,7 +186,7 @@ where
         tracing::info!("transcribing ({:.1}s)…", audio.duration().as_secs_f64());
 
         let raw = match self.stt.transcribe(&audio).await {
-            Ok(heard) if !heard.text.is_empty() && !hallucination::is_hallucination(&heard.text, rms) => heard.text,
+            Ok(heard) if !heard.text.is_empty() && !hallucination::is_hallucination(&heard.text, rms, heard.speech_confirmed) => heard.text,
             Ok(heard) => {
                 tracing::warn!("nothing usable heard (rms={rms:.4}, whisper said {:?})", heard.text);
                 self.notifier.notify(t("✗ Nothing heard — speak closer to the mic", "✗ Rien entendu — parlez plus près du micro", self.ui_lang));
@@ -346,7 +346,7 @@ mod tests {
         let mut stt = MockSpeechToText::new();
         stt.expect_warm().return_const(());
         stt.expect_transcribe()
-            .returning(|_| Ok(Transcription { text: "hello world".into() }));
+            .returning(|_| Ok(Transcription { text: "hello world".into(), ..Default::default() }));
 
         let mut inj = MockTextInjector::new();
         inj.expect_inject()
@@ -368,7 +368,7 @@ mod tests {
         rec.expect_stop().times(1).returning(|| Ok(samples(1.0)));
         let mut stt = MockSpeechToText::new();
         stt.expect_warm().return_const(());
-        stt.expect_transcribe().times(1).returning(|_| Ok(Transcription { text: "hello".into() }));
+        stt.expect_transcribe().times(1).returning(|_| Ok(Transcription { text: "hello".into(), ..Default::default() }));
         let mut inj = MockTextInjector::new();
         inj.expect_inject().with(eq("hello")).times(1).returning(|_| Ok(()));
         let mut notifier = MockNotifier::new();
@@ -438,7 +438,7 @@ mod tests {
         rec.expect_stop().returning(|| Ok(samples(1.0)));
         let mut stt = MockSpeechToText::new();
         stt.expect_warm().return_const(());
-        stt.expect_transcribe().returning(|_| Ok(Transcription { text: "salut jean".into() }));
+        stt.expect_transcribe().returning(|_| Ok(Transcription { text: "salut jean".into(), ..Default::default() }));
         let mut proc = MockTextProcessor::new();
         proc.expect_process().returning(|_| Ok("  ".into()));
         let mut inj = MockTextInjector::new();
@@ -457,7 +457,7 @@ mod tests {
         rec.expect_stop().returning(|| Ok(samples(1.0)));
         let mut stt = MockSpeechToText::new();
         stt.expect_warm().return_const(());
-        stt.expect_transcribe().returning(move |_| Ok(Transcription { text: raw.into() }));
+        stt.expect_transcribe().returning(move |_| Ok(Transcription { text: raw.into(), ..Default::default() }));
         let mut proc = MockTextProcessor::new();
         proc.expect_process().returning(|_| Ok("Un deux.".into()));
         let mut inj = MockTextInjector::new();
@@ -477,7 +477,7 @@ mod tests {
         let mut stt = MockSpeechToText::new();
         stt.expect_warm().return_const(());
         stt.expect_transcribe()
-            .returning(|_| Ok(Transcription { text: "raw text".into() }));
+            .returning(|_| Ok(Transcription { text: "raw text".into(), ..Default::default() }));
 
         let mut proc = MockTextProcessor::new();
         proc.expect_process()
@@ -548,7 +548,7 @@ mod tests {
         let mut stt = MockSpeechToText::new();
         stt.expect_warm().return_const(());
         stt.expect_transcribe()
-            .returning(|_| Ok(Transcription { text: "raw".into() }));
+            .returning(|_| Ok(Transcription { text: "raw".into(), ..Default::default() }));
 
         let mut proc = MockTextProcessor::new();
         proc.expect_process()
@@ -595,7 +595,7 @@ mod tests {
         let mut stt = MockSpeechToText::new();
         stt.expect_warm().return_const(());
         stt.expect_transcribe()
-            .returning(|_| Ok(Transcription { text: "note this".into() }));
+            .returning(|_| Ok(Transcription { text: "note this".into(), ..Default::default() }));
 
         let mut inj = MockTextInjector::new();
         inj.expect_inject().never();

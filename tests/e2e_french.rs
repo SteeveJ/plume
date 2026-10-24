@@ -54,6 +54,27 @@ async fn whisper_understands_french_speech_forced_and_auto_detected() {
     }
 }
 
+/// La limite qui existait avant le détecteur de voix : un « Merci. » très bas ressemble à l'hallucination « Merci. » de Whisper
+/// sur du bruit. Avec le détecteur (`PLUME_TEST_VAD`), la parole est confirmée et le mot est conservé ; le bruit, lui, ne l'est pas.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn a_very_quiet_merci_is_kept_thanks_to_the_voice_detector() {
+    use plume::application::hallucination::is_hallucination;
+    let Ok(vad) = std::env::var("PLUME_TEST_VAD") else { eprintln!("PLUME_TEST_VAD non défini : test ignoré"); return };
+    let whisper = WhisperCpp::load(&env_path("PLUME_TEST_GGML"), "fr", new_shared_vocab("")).unwrap().with_vad(std::path::Path::new(&vad));
+    let merci = french_audio("merci");
+    for level in [0.01f32, 0.02] {
+        let k = level / rms(&merci.samples);
+        let quiet = plume::domain::model::AudioSamples::new(merci.samples.iter().map(|x| x * k).collect(), 16_000, 1);
+        let heard = whisper.transcribe(&quiet).await.unwrap();
+        assert!(heard.speech_confirmed, "volume {level} : parole non détectée");
+        assert!(heard.text.to_lowercase().contains("merci"), "volume {level} : {:?}", heard.text);
+        assert!(!is_hallucination(&heard.text, level, heard.speech_confirmed), "volume {level} : {:?} serait écarté", heard.text);
+    }
+    let noise = whisper.transcribe(&plume::domain::model::AudioSamples::new(white_noise(0.01), 16_000, 1)).await.unwrap();
+    assert!(noise.text.is_empty() && !noise.speech_confirmed, "le bruit ne doit rien produire : {:?}", noise.text);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn llm_fixes_the_form_of_french_dictations_without_changing_the_words() {
