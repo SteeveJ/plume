@@ -1,216 +1,88 @@
 # Plume — Voice Dictation Daemon
 
-**EN** | [FR](#plume--dictée-vocale-fr)
+**English** | [Français](README.fr.md)
 
-A lightweight voice dictation daemon for Linux. Hold (or toggle) a hotkey to record your voice; Plume transcribes it with Whisper and injects the text into any focused window.
+A voice dictation daemon for Linux. Hold (or toggle) a hotkey and speak; Plume transcribes your voice with Whisper, cleans the text with a small local LLM, and types it into the focused window. Everything runs on your machine, in one binary, with no Python and no cloud account required.
 
 ## Features
 
-- **GPU-accelerated STT** — Whisper (whisper.cpp, in-process, no Python)
-- **Local LLM correction** — Qwen3 0.6B on GPU via llama.cpp (~50ms, fixes typos & punctuation)
-- **Silence detection** — RMS + Whisper `no_speech_prob` filters reject noise and disconnected mic
-- **Live vocabulary learning** — capitalised words and acronyms auto-appended to `vocab.txt`
-- **System tray** — blue circle (idle) / red circle (recording)
-- **GTK4 settings window** — English / Français UI
-- **Processor escalation** — if style ≠ clean and no local GPU, escalates to OpenAI/Anthropic
+- **Speech-to-text with whisper.cpp**, in-process, on GPU (CUDA, Vulkan) or CPU. Language is detected automatically or fixed with `STT_LANG`.
+- **Local LLM correction** — Qwen3 0.6B through llama.cpp fixes punctuation, capitalisation and obvious transcription errors without changing your words.
+- **Protection against invented text** — silence and noise never reach your document (volume check, Whisper's non-speech tags, known hallucinations such as "Thank you.").
+- **Snippets** — say a phrase, get a text (`~/.local/share/plume/snippets.txt`).
+- **Live vocabulary** — names and acronyms are learned into `vocab.txt` and fed back to Whisper.
+- **Light on memory** — Whisper is unloaded after 5 idle minutes and reloaded while you start speaking.
+- **System tray + GTK4 settings window**, English / Français.
+- **Optional online styles** — formal, casual, excited, professional, diplomatic, assertive, humor (need an OpenAI or Anthropic key).
 
 ## Requirements
 
-### System
-- Linux kernel ≥ 4.5 with `CONFIG_INPUT_UINPUT` (standard on all desktop distros)
-- GTK4 runtime
-- A running D-Bus session (standard on all desktop environments)
-- **uinput permissions**: add yourself to the `input` group and install the udev rule:
+- Linux with `CONFIG_INPUT_UINPUT`, GTK4, a D-Bus session.
+- Permission to use uinput:
 
 ```bash
 sudo cp assets/99-plume.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules
-sudo usermod -aG input $USER
-# log out and back in
+sudo usermod -aG input $USER   # then log out and back in
 ```
 
-### Whisper
-Built in (whisper.cpp, no Python). The `ggml` model for `STT_MODEL` is downloaded automatically on first launch into `~/.local/share/plume/`.
-Build needs `cmake`, a C/C++ compiler and binutils (`nm`, `objcopy`) — nothing at runtime.
-
-### Rust toolchain
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
+- To build: a Rust toolchain, `cmake`, a C/C++ compiler and binutils (`nm`, `objcopy`). Nothing of this is needed at runtime. GPU builds also need the CUDA toolkit or the Vulkan SDK.
 
 ## Install
 
 ```bash
 git clone https://github.com/SteeveJ/plume && cd plume
 
-# Without GPU (CPU only):
-cargo build --release
-
-# With NVIDIA GPU (CUDA):
-CUDA_PATH=/usr/local/cuda cargo build --release --features cuda
-# Arch/CachyOS: CUDA_PATH=/opt/cuda
-
-# With AMD GPU (Vulkan):
-cargo build --release --features vulkan
+cargo build --release                                              # CPU only
+CUDA_PATH=/usr/local/cuda cargo build --release --features cuda    # NVIDIA (Arch: /opt/cuda)
+cargo build --release --features vulkan                            # AMD / others
 
 ./target/release/plume --install
 ```
 
-### CUDA path by distro
-| Distro | CUDA_PATH |
-|--------|-----------|
-| Arch / CachyOS | `/opt/cuda` |
-| Ubuntu / Debian | `/usr/local/cuda` |
-| Fedora | `/usr/local/cuda` |
+On first launch Plume downloads the speech model for `STT_MODEL` and the LLM (about 390 MB) into `~/.local/share/plume/` and tells you with a notification. If the machine cannot hold the speech model in RAM it says so and suggests a smaller one.
 
 ## Usage
 
-| Action | Default |
-|--------|---------|
-| Hold to record | Right Ctrl |
-| Open settings | Tray → Settings |
-| Download Whisper model | `plume --download-model` |
+Hold **Right Ctrl**, speak, release. Change the key, mode, language, model and style in the tray menu → *Settings*, or edit `~/.config/plume.conf`.
 
-## Configuration
+| Command | Effect |
+|---------|--------|
+| `plume` | start the daemon (done by autostart after `--install`) |
+| `plume --settings` | open the settings window |
+| `plume --restart` | stop the running daemon and start a fresh one |
+| `plume --download-model` | download the LLM now |
+| `plume --install` | install binary, icons, desktop entry and autostart |
 
-Edit `~/.config/plume.conf` or use the settings window (tray → Settings).
+## Measured performance
 
-| Key | Default | Description |
-|-----|---------|-------------|
-| `HOTKEY` | `KEY_RIGHTCTRL` | Recording key |
-| `MODE` | `hold` | `hold` or `toggle` |
-| `STT_MODEL` | `turbo` | Whisper model size (`tiny` … `large-v2`, `turbo`; quantized variants such as `small-q8_0` use less RAM) |
-| `STT_LANG` | `fr` | Language (`fr`, `en`, … or empty for auto-detect) |
-| `PROCESSOR` | `local` | `local` / `openai` / `anthropic` / `ollama` / `none` |
-| `PROCESSOR_STYLE` | `clean` | `clean` / `professional` / `diplomatic` / `assertive` / `humor` |
-| `OUTPUT` | `inject` | `inject` / `scratchpad` / `both` |
+RTX 5080 16 GB, Whisper `turbo` (f16) and Qwen3 0.6B on the GPU, one process:
 
-## Benchmark (RTX 5080, CUDA)
+| | |
+|---|---|
+| Speech-to-text, 11 s of audio | ~115 ms (CPU only: 4.3 s) |
+| Speech-to-text, 5 minutes of audio | 2.4 s |
+| LLM correction of a sentence | ~0.5 s |
+| Process memory | ~680 MB RAM, ~2.6 GB VRAM |
+| Binary size | 14 MB (CPU) / 604 MB (CUDA, cuBLAS linked statically) |
 
-```
-STT warm (5s audio)    ~60 ms
-Processor (50 words)   ~50 ms
-Inject                ~150 ms
-Total                 ~260 ms
-```
+## Documentation
 
-## Architecture
+Full guides are in [`docs/`](docs/README.md): [configuration](docs/en/configuration.md), [architecture](docs/en/architecture.md), [development and tests](docs/en/development.md), [troubleshooting](docs/en/troubleshooting.md), and the [architecture decision records](docs/en/adr/README.md).
 
-```
-CpalRecorder → DictationService → WhisperCpp (whisper.cpp, in-process)
-                                → LocalProcessor (llama.cpp, CUDA/Vulkan/CPU)
-                                → EnigoInjector (uinput Ctrl+V)
-```
+## Known limitations
 
-**Design notes**
-- `TextProcessor` is the central bridge between STT, LLM, tray, and vocab — the highest-connectivity node in the graph
-- Whisper (whisper.cpp) and the LLM (llama.cpp) live in the same binary: `vendor/whisper-rs-sys` prefixes whisper's ggml symbols at build time to avoid clashing with llama's
-- Zero runtime binary deps: arboard+uinput (no wl-copy/xdotool), notify-rust D-Bus (no notify-send), XDG autostart (no systemd user service needed) — everything works out of the box on any desktop
+- The 0.6B LLM corrects roughly four sentences out of six; on a long text it can fail to answer and Plume keeps your raw text. A larger model is on the to-do list.
+- A very quiet voice (below the noise threshold) saying exactly "thank you" or "merci" is treated as noise.
+- Only CUDA has been tested on GPU; the Vulkan build is untested.
+- Always-on-top overlays are not available on GNOME Wayland without a compositor extension.
 
 ## Distro compatibility
 
 | Distro | Status | Notes |
 |--------|--------|-------|
-| Arch / CachyOS | ✅ Tested | |
-| Ubuntu 22.04+ | ✅ Should work | `libgtk-4-dev`, CUDA at `/usr/local/cuda` |
-| Fedora 38+ | ✅ Should work | `gtk4-devel` |
-| Debian 12+ | ✅ Should work | `libgtk-4-dev`, `gtk-update-icon-cache` optional |
-| NixOS | ⚠ Untested | CUDA store path must be set manually |
-
-## Known Issues / TODO
-
-**Must fix**
-- [x] Local Whisper: Python server removed (whisper.cpp in-process); falls back to OpenAI if the model can't be loaded or downloaded
-
-**Should fix**
-- [ ] `main.rs` — `ollama_available()` fires a full inference request; replace with `GET /api/version`
-- [ ] `local_processor.rs` — `LlamaContext` recreated on every call (~100ms wasted per dictation)
-- [ ] `civic_processor.rs` — orphan file, not in `mod.rs`, never compiled; delete
-- [ ] `enigo_injector.rs` — clipboard restore races the paste on slow windows
-
----
-
-# Plume — Dictée Vocale (FR)
-
-Un daemon de dictée vocale léger pour Linux. Maintenez (ou basculez) un raccourci clavier pour enregistrer votre voix ; Plume transcrit avec Whisper et injecte le texte dans la fenêtre active.
-
-## Fonctionnalités
-
-- **STT accéléré GPU** — Whisper (whisper.cpp en processus, sans Python)
-- **Correction LLM local** — Qwen3 0.6B sur GPU via llama.cpp (~50ms, corrige fautes & ponctuation)
-- **Détection de silence** — RMS + `no_speech_prob` Whisper filtrent le bruit / micro débranché
-- **Apprentissage du vocabulaire** — mots capitalisés et acronymes ajoutés automatiquement à `vocab.txt`
-- **Icône dans la barre** — rond bleu (inactif) / rond rouge (enregistrement)
-- **Fenêtre de paramètres GTK4** — interface English / Français
-- **Escalade de processeur** — si style ≠ correction et pas de GPU local, bascule sur OpenAI/Anthropic
-
-## Prérequis
-
-### Système
-- Noyau Linux ≥ 4.5 avec `CONFIG_INPUT_UINPUT`
-- GTK4
-- Session D-Bus active
-
-**Permissions uinput** — ajouter l'utilisateur au groupe `input` et installer la règle udev :
-
-```bash
-sudo cp assets/99-plume.rules /etc/udev/rules.d/
-sudo udevadm control --reload-rules
-sudo usermod -aG input $USER
-# se déconnecter et se reconnecter
-```
-
-### Whisper
-Intégré (whisper.cpp, sans Python). Le modèle `ggml` correspondant à `STT_MODEL` est téléchargé automatiquement au premier lancement dans `~/.local/share/plume/`.
-Le build nécessite `cmake`, un compilateur C/C++ et binutils (`nm`, `objcopy`) — rien à l'exécution.
-
-## Installation
-
-```bash
-git clone https://github.com/SteeveJ/plume && cd plume
-
-# Sans GPU (CPU) :
-cargo build --release
-
-# Avec GPU NVIDIA (CUDA) :
-CUDA_PATH=/usr/local/cuda cargo build --release --features cuda
-# Arch/CachyOS : CUDA_PATH=/opt/cuda
-
-# Avec GPU AMD (Vulkan) :
-cargo build --release --features vulkan
-
-./target/release/plume --install
-```
-
-## Configuration
-
-Modifiez `~/.config/plume.conf` ou utilisez la fenêtre de paramètres (icône → Paramètres).
-
-| Clé | Défaut | Description |
-|-----|--------|-------------|
-| `HOTKEY` | `KEY_RIGHTCTRL` | Touche d'enregistrement |
-| `MODE` | `hold` | `hold` (maintien) ou `toggle` (bascule) |
-| `STT_MODEL` | `turbo` | Taille du modèle Whisper (`tiny` … `large-v2`, `turbo` ; les variantes quantifiées comme `small-q8_0` utilisent moins de RAM) |
-| `STT_LANG` | `fr` | Langue (`fr`, `en`, … ou vide pour auto) |
-| `PROCESSOR` | `local` | `local` / `openai` / `anthropic` / `ollama` / `none` |
-| `PROCESSOR_STYLE` | `clean` | `clean` / `professional` / `diplomatic` / `assertive` / `humor` |
-| `OUTPUT` | `inject` | `inject` / `scratchpad` / `les deux` |
-
-## Benchmark (RTX 5080, CUDA)
-
-```
-STT chaud (audio 5s)   ~60 ms
-Processeur (50 mots)   ~50 ms
-Injection             ~150 ms
-Total                 ~260 ms
-```
-
-## Compatibilité distros
-
-| Distro | Statut | Notes |
-|--------|--------|-------|
-| Arch / CachyOS | ✅ Testé | |
-| Ubuntu 22.04+ | ✅ Devrait fonctionner | `libgtk-4-dev`, CUDA dans `/usr/local/cuda` |
-| Fedora 38+ | ✅ Devrait fonctionner | `gtk4-devel` |
-| Debian 12+ | ✅ Devrait fonctionner | `libgtk-4-dev`, `gtk-update-icon-cache` optionnel |
-| NixOS | ⚠ Non testé | Chemin CUDA à configurer manuellement |
+| Arch / CachyOS | Tested | |
+| Ubuntu 22.04+ | Should work | `libgtk-4-dev`, CUDA at `/usr/local/cuda` |
+| Fedora 38+ | Should work | `gtk4-devel` |
+| Debian 12+ | Should work | `libgtk-4-dev`, `gtk-update-icon-cache` optional |
+| NixOS | Untested | CUDA path must be set manually |
