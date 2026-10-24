@@ -252,8 +252,8 @@ where
                 _ => chunk.to_string(),
             };
             match p.process(&input).await {
-                Ok(t) if !(self.content_guard && lost_content(chunk, &t)) => out.push(t),
-                Ok(_) => { tracing::warn!("processor dropped content, keeping raw chunk"); out.push(chunk.to_string()); }
+                Ok(t) if !t.trim().is_empty() && !(self.content_guard && lost_content(chunk, &t)) => out.push(t),
+                Ok(_) => { tracing::warn!("processor returned empty or shortened text, keeping raw chunk"); out.push(chunk.to_string()); }
                 Err(e) => { tracing::warn!("processor error: {e}"); out.push(chunk.to_string()); }
             }
         }
@@ -417,6 +417,24 @@ mod tests {
         assert!(lost_content(&long, &"mot ".repeat(20)));
         assert!(lost_content(&long, &"mot ".repeat(26)));
         assert!(!lost_content(&long, &"mot ".repeat(28)));
+    }
+
+    #[test]
+    fn empty_processor_output_never_erases_the_dictation() {
+        let mut rec = MockAudioRecorder::new();
+        rec.expect_start().returning(|| Ok(()));
+        rec.expect_stop().returning(|| Ok(samples(1.0)));
+        let mut stt = MockSpeechToText::new();
+        stt.expect_warm().return_const(());
+        stt.expect_transcribe().returning(|_| Ok(Transcription { text: "salut jean".into() }));
+        let mut proc = MockTextProcessor::new();
+        proc.expect_process().returning(|_| Ok("  ".into()));
+        let mut inj = MockTextInjector::new();
+        inj.expect_inject().with(eq("salut jean")).times(1).returning(|_| Ok(()));
+        let mut notifier = MockNotifier::new();
+        notifier.expect_notify().return_const(());
+        let mut svc = DictationService::new(rec, stt, inj, Some(Box::new(proc)), Box::new(notifier));
+        run(&mut svc, vec![HotkeyEvent::RecordStart, HotkeyEvent::RecordStop]);
     }
 
     #[test]

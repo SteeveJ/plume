@@ -12,7 +12,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use crate::domain::ports::processor::TextProcessor;
 
-// Budget de génération fixe (Qwen3 peut "réfléchir" jusqu'à 1024 tokens malgré /nothink) ; KV cache = prompt + budget au lieu de 4096 fixes (~450 Mo).
+// Budget de génération fixe (Qwen3 réfléchit avant de répondre : le budget couvre la réflexion et la réponse) ; KV cache = prompt + budget au lieu de 4096 fixes (~450 Mo).
 const MAX_NEW: u32 = 1024;
 fn ctx_sizes(n_prompt: usize) -> (u32, u32) {
     (n_prompt as u32 + MAX_NEW, MAX_NEW)
@@ -90,16 +90,17 @@ impl Inner {
     }
 }
 
+/// Gabarit Qwen3 : la réflexion reste activée, car le petit modèle corrige bien mieux ainsi (mesuré : en mode sans réflexion
+/// il rend le plus souvent le texte inchangé). Le bloc `<think>` est retiré de la sortie. Aucun suffixe `/nothink` :
+/// Qwen3 ne le reconnaît pas (le vrai est `/no_think`) et le modèle le recopiait dans le texte corrigé.
+fn chat_prompt(system: &str, raw: &str) -> String {
+    format!("<|im_start|>system\n{system}<|im_end|>\n<|im_start|>user\n{raw}<|im_end|>\n<|im_start|>assistant\n")
+}
+
 #[async_trait]
 impl TextProcessor for LocalProcessor {
     async fn process(&self, raw: &str) -> Result<String> {
-        // /nothink disables Qwen3 chain-of-thought to save tokens and avoid the <think> block.
-        let prompt = format!(
-            "<|im_start|>system\n{}<|im_end|>\n\
-             <|im_start|>user\n{raw} /nothink<|im_end|>\n\
-             <|im_start|>assistant\n",
-            self.inner.system_prompt
-        );
+        let prompt = chat_prompt(&self.inner.system_prompt, raw);
         // Hors du thread async : la boucle de dictée reste libre de voir une nouvelle pression de touche.
         let inner = self.inner.clone();
         tokio::task::spawn_blocking(move || inner.generate(&prompt)).await.context("llm task")?
@@ -108,7 +109,16 @@ impl TextProcessor for LocalProcessor {
 
 #[cfg(test)]
 mod tests {
-    use super::ctx_sizes;
+    use super::{chat_prompt, ctx_sizes};
+
+    #[test]
+    fn prompt_does_not_pollute_the_user_text() {
+        let p = chat_prompt("SYS", "bonjour");
+        assert!(p.starts_with("<|im_start|>system\nSYS<|im_end|>"));
+        assert!(p.contains("<|im_start|>user\nbonjour<|im_end|>"));
+        assert!(p.ends_with("<|im_start|>assistant\n"));
+        assert!(!p.contains("nothink") && !p.contains("no_think"));
+    }
 
     #[test]
     fn ctx_scales_with_prompt_and_stays_bounded() {
