@@ -19,3 +19,7 @@ On y renonce. L'utilisateur est informé par ce qui existe déjà et marche part
 - Pas de badge visible au-dessus des autres fenêtres pendant qu'on parle ; le retour passe par l'icône et les notifications.
 - Les historique, snippets et dictionnaire restent des fichiers texte et une base SQLite, éditables sans fenêtre dédiée.
 - À reconsidérer si GNOME adopte `layer-shell`, ou pour KDE et les compositeurs wlroots qui le gèrent déjà.
+
+## Note de correction (2026-10-24)
+
+Cette décision a été prise en raisonnant sur GNOME. La machine de développement tourne sous **COSMIC** (Wayland), dont le compositeur implémente `layer-shell` : un overlay y serait possible. Le choix de renoncer reste valable (le retour par l'icône et les notifications suffit), mais son motif technique ne vaut que pour GNOME ; à reconsidérer sans surcoût de principe pour COSMIC, KDE et les compositeurs wlroots.

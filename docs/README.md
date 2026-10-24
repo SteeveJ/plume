@@ -29,3 +29,4 @@ Available in both languages · Disponibles dans les deux langues : [English](en/
 | 0013 | [Four test levels, real models and real bugs](en/adr/0013-test-strategy.md) | [Quatre niveaux de tests, vrais modèles et vrais bugs](fr/adr/0013-strategie-de-tests.md) |
 | 0014 | [Silero voice detector in front of Whisper](en/adr/0014-silero-voice-detector.md) | [Détecteur de voix Silero avant Whisper](fr/adr/0014-detecteur-de-voix-silero.md) |
 | 0015 | [No floating overlay, status bubble or "hub" window](en/adr/0015-no-floating-overlay.md) | [Pas d'overlay flottant, de bulle d'état ni de fenêtre « hub »](fr/adr/0015-pas-d-overlay-flottant.md) |
+| 0016 | [Instruction mode: rewrite the selection with an online model](en/adr/0016-instruction-mode.md) | [Mode instruction : réécrire la sélection avec un modèle en ligne](fr/adr/0016-mode-instruction.md) |

@@ -19,3 +19,7 @@ We give up. The user is informed by what already exists and works everywhere: th
 - No badge above other windows while you speak; feedback goes through the icon and notifications.
 - History, snippets and the dictionary stay text files and a SQLite database, editable without a dedicated window.
 - To reconsider if GNOME adopts `layer-shell`, or for KDE and wlroots compositors that already support it.
+
+## Correction note (2026-10-24)
+
+This decision was made reasoning about GNOME. The development machine runs **COSMIC** (Wayland), whose compositor implements `layer-shell`: an overlay would be possible there. Giving up remains valid (feedback through the icon and notifications is enough), but its technical reason only holds for GNOME; to reconsider at no extra cost of principle for COSMIC, KDE and wlroots compositors.

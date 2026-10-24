@@ -13,6 +13,7 @@ src/
     processor/         LocalProcessor (llama.cpp), Ollama, OpenAi, Anthropic
     injector/          ClipboardInjector     clipboard + uinput Ctrl+V
     context/           AtspiContext          text before the cursor, via accessibility
+    selection/         PrimarySelection      selected text, for instruction mode
     history/ scratchpad/ notifier/ http/
   application/
     dictation.rs       DictationService      the whole flow below
@@ -30,6 +31,10 @@ src/
 6. Names and acronyms found in the text are appended to `vocab.txt`.
 
 A new key press during step 3 or 4 is seen immediately and starts a new recording ([ADR 0007](adr/0007-compute-off-the-async-loop.md)).
+
+## Instruction mode
+
+With `INSTRUCT_HOTKEY` set and an online key, a second key rewrites the selected text ([ADR 0016](adr/0016-instruction-mode.md)). On press `PrimarySelection` reads the desktop selection (no key is simulated); the recording and the listening chain are the same as dictation (`hear()`), then the online model gets `Instruction` + `Text` and the answer is pasted over the selection. An empty answer or an error pastes nothing.
 
 ## Memory and resources
 

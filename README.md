@@ -13,6 +13,7 @@ A voice dictation daemon for Linux. Hold (or toggle) a hotkey and speak; Plume t
 - **Live vocabulary** — names and acronyms are learned into `vocab.txt` and fed back to Whisper.
 - **Light on memory** — Whisper is unloaded after 5 idle minutes and reloaded while you start speaking.
 - **System tray + GTK4 settings window**, English / Français.
+- **Instruction mode (optional)** — select text anywhere, hold a second key and say "make it more formal" or "translate to English"; an online model rewrites the selection in place. Needs an OpenAI or Anthropic key and sends the selected text to it.
 - **Optional online styles** — formal, casual, excited, professional, diplomatic, assertive, humor (need an OpenAI or Anthropic key).
 
 ## Requirements
@@ -65,6 +66,26 @@ RTX 5080 16 GB, Whisper `turbo` (f16) and Qwen3 0.6B on the GPU, one process:
 | LLM correction of a sentence | ~0.5 s |
 | Process memory | ~680 MB RAM, ~2.6 GB VRAM |
 | Binary size | 14 MB (CPU) / 604 MB (CUDA, cuBLAS linked statically) |
+
+## Security and privacy
+
+No software can promise to be secure, so here is what Plume does, what it doesn't, and what nobody has checked yet.
+
+**What stays on your machine.** With the defaults (`PROCESSOR=local` and no API key) your voice, your text and your history never leave the computer: recognition and correction both run locally. The daemon listens on no network port and holds no elevated Linux privileges. Your config file, history and scratchpad can only be read by your user, and none of its log messages mention an API key.
+
+**What leaves it, and when.**
+- The models, downloaded once from Hugging Face over HTTPS.
+- With `PROCESSOR=openai` or `anthropic`, or an online style such as `formal`: the dictated text, plus up to 2,000 characters before your cursor (read through accessibility). There is no switch for that second part yet.
+- With instruction mode: the text you selected and your spoken instruction.
+- If the local speech model can't load and an OpenAI key is set, Plume falls back to OpenAI's speech API, and that sends your audio.
+
+**Known weak spots.**
+- The Whisper and voice-detector models are downloaded without a checksum, then read by C++ code. A tampered file would be a real problem. Pinning checksums is the next fix.
+- Plume needs the `input` group to see your hotkey and to type. That group isn't specific to Plume: any program you run can use it to read keystrokes or inject them. Plume itself only looks at the key you configured.
+- API keys sit in `plume.conf` in plain text, and `history.db` keeps your last 10,000 dictations the same way. Both are mode 600, so disk encryption is what protects them if the machine is lost. Dictated text also stays in the clipboard, where a clipboard manager may keep it.
+- Nothing sandboxes the process.
+
+**Not checked yet.** The roughly 400 dependencies have never been through `cargo audit` or `cargo deny`. The copy of whisper.cpp in `vendor/` doesn't update itself. And nobody outside the project has reviewed the code. To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
 ## Documentation
 

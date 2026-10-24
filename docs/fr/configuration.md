@@ -15,6 +15,7 @@ Les clés inconnues et les valeurs invalides sont signalées par une notificatio
 | `STT_PROMPT` | vide | Mots que Whisper doit privilégier (noms, jargon) |
 | `PROCESSOR` | `local` | `local` (Qwen3 0,6B), `openai`, `anthropic`, `ollama`, `none` |
 | `PROCESSOR_STYLE` | `clean` | `clean` corrige seulement les erreurs. Les autres réécrivent et demandent un modèle en ligne : `casual`, `excited`, `formal`, `professional`, `diplomatic` (alias `soften`), `assertive`, `humor` |
+| `INSTRUCT_HOTKEY` | vide (désactivé) | Seconde touche du **mode instruction** : sélectionnez un texte dans n'importe quelle appli, maintenez cette touche et dites quoi en faire (« rends ça plus formel », « traduis en anglais »). Demande `OPENAI_API_KEY` ou `ANTHROPIC_API_KEY` ; le texte sélectionné est envoyé à ce service. Mêmes valeurs que `HOTKEY`, différente de celle-ci |
 | `OUTPUT` | `inject` | `inject` tape dans la fenêtre active ; `scratchpad` ajoute à `scratch.txt` et au presse-papiers ; `both` |
 | `APP_LANG` | `en` | Langue des notifications et de la fenêtre de réglages (`en`, `fr`) |
 | `OPENAI_API_KEY`, `OPENAI_PROCESSOR_MODEL` | — / `gpt-4o-mini` | Pour `PROCESSOR=openai`, les styles en ligne, et en secours pour la reconnaissance vocale |

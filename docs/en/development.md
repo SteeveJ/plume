@@ -17,7 +17,7 @@ A CUDA build takes about 11 minutes the first time (two copies of the CUDA kerne
 | Command | What it covers | Needs |
 |---------|----------------|-------|
 | `cargo test --lib` | Unit tests: config parsing, snippets, filters, memory maths, hotkey mapping, history, restart | nothing |
-| `cargo test --test config_load --test pipeline --test hallucinations --test french` | Real adapters with a fake microphone, keyboard and Whisper: config file, full dictation flow, hallucination cases, French accents and notifications | nothing |
+| `cargo test --test config_load --test pipeline --test hallucinations --test french --test instruct` | Real adapters with a fake microphone, keyboard and Whisper: config file, full dictation flow, hallucination cases, French accents and notifications, instruction mode | nothing |
 | `PLUME_TEST_GGML=… PLUME_TEST_GGUF=… [PLUME_TEST_VAD=…] cargo test --release --test e2e_models -- --ignored` | Real Whisper and Qwen in one process, noise, silence. With `PLUME_TEST_VAD` (the Silero file) noise must produce no text at all | a ggml model, `model.gguf`, optionally the voice detector |
 | `… cargo test --release --test e2e_french -- --ignored` | Understanding of spoken French by Whisper (forced and auto-detected language) and by the LLM | same |
 | `PLUME_TEST_GGUF=… cargo test --release --test e2e_llm_eval -- --ignored --nocapture` | Rates a correction LLM on 12 French cases (empty answers, changed words, well-formed sentences). Passes for Qwen3-0.6B, fails for 1.7B | `model.gguf` |
@@ -41,3 +41,5 @@ Each integration test pins a real defect: a tray change of `PROCESSOR` that eras
 ## Conventions
 
 Heavy work goes through `spawn_blocking`. Errors from the microphone, models or network never stop the daemon: notify with the cause and wait for the next key press. Files with keys or dictated text are created with `config::write_private`.
+
+**Code comments are written in English** (including doc comments, test comments and build scripts). User-facing text is not a comment: notifications and the settings window go through `t(en, fr, lang)` and are available in English and French.

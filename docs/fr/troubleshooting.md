@@ -14,6 +14,9 @@ Plume démarre sans terminal : les échecs s'affichent donc en notifications de 
 | « needs about … MB of free RAM » | Le `STT_MODEL` choisi ne tient pas. Prenez un modèle plus petit ou quantifié (`small-q8_0`, `large-v3-turbo-q5_0`) ou libérez de la mémoire |
 | La transcription prend des secondes | Vous êtes sur CPU. Compilez avec `--features cuda` (NVIDIA). `turbo` sur CPU demande environ 4 s pour 11 s d'audio |
 | Le texte n'est pas corrigé | Le modèle de 0,6B rend parfois le texte inchangé, et sur un texte long il peut ne pas répondre ; Plume garde alors vos mots bruts. Un LLM local plus gros (Qwen3-1.7B) a été testé et n'est pas meilleur ; essayez plutôt un `PROCESSOR` en ligne |
+| « Sélectionnez d'abord le texte à modifier » (mode instruction) | Rien n'est sélectionné, ou l'application ne publie pas sa sélection. Sélectionnez le texte à la souris ou au clavier, puis maintenez la touche d'instruction. Les terminaux et certaines applis peuvent ne pas la publier |
+| « Réécriture impossible : … » (mode instruction) | Le modèle en ligne a refusé (mauvaise clé, plus de crédit, pas de réseau). Votre texte est intact |
+| L'instruction a remplacé le mauvais texte | Le bureau garde la dernière sélection même après qu'une appli l'a désélectionnée. La notification montre le début du texte lu ; Ctrl+Z annule |
 | Les réglages ne s'appliquent pas | Utilisez *Sauvegarder et relancer*, icône → *Reload config*, ou `plume --restart` |
 | Pas assez d'espace disque | Plume vérifie l'espace libre avant un téléchargement et indique ce qu'il faut |
 

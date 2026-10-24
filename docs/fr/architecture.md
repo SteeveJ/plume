@@ -13,6 +13,7 @@ src/
     processor/         LocalProcessor (llama.cpp), Ollama, OpenAi, Anthropic
     injector/          ClipboardInjector     presse-papiers + Ctrl+V via uinput
     context/           AtspiContext          texte avant le curseur, via l'accessibilité
+    selection/         PrimarySelection      texte sélectionné, pour le mode instruction
     history/ scratchpad/ notifier/ http/
   application/
     dictation.rs       DictationService      tout le déroulé ci-dessous
@@ -30,6 +31,10 @@ src/
 6. Les noms et sigles trouvés dans le texte sont ajoutés à `vocab.txt`.
 
 Un nouvel appui sur la touche pendant l'étape 3 ou 4 est vu immédiatement et démarre un nouvel enregistrement ([ADR 0007](adr/0007-calcul-hors-boucle-async.md)).
+
+## Mode instruction
+
+Avec `INSTRUCT_HOTKEY` défini et une clé en ligne, une seconde touche réécrit le texte sélectionné ([ADR 0016](adr/0016-mode-instruction.md)). À l'appui, `PrimarySelection` lit la sélection du bureau (aucune touche n'est simulée) ; l'enregistrement et la chaîne d'écoute sont ceux de la dictée (`hear()`), puis le modèle en ligne reçoit `Instruction` + `Text` et la réponse est collée par-dessus la sélection. Une réponse vide ou une erreur ne colle rien.
 
 ## Mémoire et ressources
 

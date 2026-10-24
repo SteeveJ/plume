@@ -15,6 +15,7 @@ Unknown keys and invalid values are reported by a notification at startup and in
 | `STT_PROMPT` | empty | Words Whisper should favour (names, jargon) |
 | `PROCESSOR` | `local` | `local` (Qwen3 0.6B), `openai`, `anthropic`, `ollama`, `none` |
 | `PROCESSOR_STYLE` | `clean` | `clean` fixes errors only. Others rewrite and need an online model: `casual`, `excited`, `formal`, `professional`, `diplomatic` (alias `soften`), `assertive`, `humor` |
+| `INSTRUCT_HOTKEY` | empty (off) | Second key for **instruction mode**: select text in any app, hold this key and say what to do with it ("make it more formal", "translate to English"). Needs `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`; the selected text is sent to that service. Same values as `HOTKEY`, must differ from it |
 | `OUTPUT` | `inject` | `inject` types into the focused window; `scratchpad` appends to `scratch.txt` and the clipboard; `both` |
 | `APP_LANG` | `en` | Language of notifications and the settings window (`en`, `fr`) |
 | `OPENAI_API_KEY`, `OPENAI_PROCESSOR_MODEL` | — / `gpt-4o-mini` | Used by `PROCESSOR=openai`, online styles, and as speech fallback |

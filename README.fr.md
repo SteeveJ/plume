@@ -13,6 +13,7 @@ Un démon de dictée vocale pour Linux. Maintenez (ou basculez) un raccourci cla
 - **Vocabulaire vivant** — noms et sigles sont appris dans `vocab.txt` et renvoyés à Whisper.
 - **Sobre en mémoire** — Whisper est déchargé après 5 minutes d'inactivité et rechargé pendant que vous commencez à parler.
 - **Icône dans la barre + fenêtre de réglages GTK4**, English / Français.
+- **Mode instruction (facultatif)** — sélectionnez un texte n'importe où, maintenez une seconde touche et dites « rends ça plus formel » ou « traduis en anglais » ; un modèle en ligne réécrit la sélection sur place. Demande une clé OpenAI ou Anthropic et lui envoie le texte sélectionné.
 - **Styles en ligne facultatifs** — formel, décontracté, enthousiaste, professionnel, diplomatique, assertif, humour (clé OpenAI ou Anthropic nécessaire).
 
 ## Prérequis
@@ -65,6 +66,26 @@ RTX 5080 16 Go, Whisper `turbo` (f16) et Qwen3 0,6B sur le GPU, un seul processu
 | Correction d'une phrase par le LLM | ~0,5 s |
 | Mémoire du processus | ~680 Mo de RAM, ~2,6 Go de VRAM |
 | Taille du binaire | 14 Mo (CPU) / 604 Mo (CUDA, cuBLAS lié statiquement) |
+
+## Sécurité et vie privée
+
+Aucun logiciel ne peut promettre d'être sûr. Voici donc ce que Plume fait, ce qu'il ne fait pas, et ce que personne n'a encore vérifié.
+
+**Ce qui reste sur votre machine.** Avec les réglages par défaut (`PROCESSOR=local` et aucune clé d'API), votre voix, vos textes et votre historique ne quittent jamais l'ordinateur : la reconnaissance et la correction tournent toutes les deux en local. Le démon n'écoute sur aucun port réseau et n'a aucun privilège Linux élevé. Votre fichier de configuration, l'historique et le bloc-notes ne sont lisibles que par votre utilisateur, et aucun message de son journal ne mentionne une clé d'API.
+
+**Ce qui sort, et quand.**
+- Les modèles, téléchargés une fois depuis Hugging Face en HTTPS.
+- Avec `PROCESSOR=openai` ou `anthropic`, ou un style en ligne comme `formal` : le texte dicté, plus jusqu'à 2 000 caractères avant votre curseur (lus par l'accessibilité). Il n'existe pas encore d'interrupteur pour cette seconde partie.
+- Avec le mode instruction : le texte sélectionné et votre instruction orale.
+- Si le modèle vocal local ne se charge pas et qu'une clé OpenAI est définie, Plume se rabat sur l'API vocale d'OpenAI, et cela envoie votre audio.
+
+**Points faibles connus.**
+- Les modèles Whisper et du détecteur de voix sont téléchargés sans empreinte de contrôle, puis lus par du code C++. Un fichier trafiqué serait un vrai problème. Épingler les empreintes est la prochaine correction.
+- Plume a besoin du groupe `input` pour voir votre touche et pour taper. Ce groupe n'est pas propre à Plume : n'importe quel programme que vous lancez peut s'en servir pour lire les frappes ou en injecter. Plume, lui, ne regarde que la touche que vous avez choisie.
+- Les clés d'API sont dans `plume.conf` en clair, et `history.db` garde vos 10 000 dernières dictées de la même façon. Les deux sont en mode 600 : si la machine est perdue, c'est le chiffrement du disque qui les protège. Le texte dicté reste aussi dans le presse-papiers, où un gestionnaire peut le conserver.
+- Rien ne cloisonne le processus.
+
+**Pas encore vérifié.** Les quelque 400 dépendances n'ont jamais été passées dans `cargo audit` ni `cargo deny`. La copie de whisper.cpp dans `vendor/` ne se met pas à jour toute seule. Et personne en dehors du projet n'a relu le code. Pour signaler une faille, voir [SECURITY.fr.md](SECURITY.fr.md).
 
 ## Documentation
 

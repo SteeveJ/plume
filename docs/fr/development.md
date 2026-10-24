@@ -17,7 +17,7 @@ Un build CUDA prend environ 11 minutes la première fois (deux copies des noyaux
 | Commande | Ce qu'elle couvre | Il faut |
 |----------|-------------------|---------|
 | `cargo test --lib` | Tests unitaires : lecture de la config, snippets, filtres, calculs mémoire, touches, historique, redémarrage | rien |
-| `cargo test --test config_load --test pipeline --test hallucinations --test french` | Vrais adaptateurs avec faux micro, faux clavier et faux Whisper : fichier de config, chaîne de dictée complète, cas d'hallucination, accents et notifications en français | rien |
+| `cargo test --test config_load --test pipeline --test hallucinations --test french --test instruct` | Vrais adaptateurs avec faux micro, faux clavier et faux Whisper : fichier de config, chaîne de dictée complète, cas d'hallucination, accents et notifications en français, mode instruction | rien |
 | `PLUME_TEST_GGML=… PLUME_TEST_GGUF=… [PLUME_TEST_VAD=…] cargo test --release --test e2e_models -- --ignored` | Vrais Whisper et Qwen dans un processus, bruit, silence. Avec `PLUME_TEST_VAD` (le fichier Silero) le bruit ne doit produire aucun texte | un modèle ggml, `model.gguf`, et si possible le détecteur de voix |
 | `… cargo test --release --test e2e_french -- --ignored` | Compréhension du français parlé par Whisper (langue forcée et détectée) et par le LLM | idem |
 | `PLUME_TEST_GGUF=… cargo test --release --test e2e_llm_eval -- --ignored --nocapture` | Note un LLM de correction sur 12 cas français (réponses vides, mots changés, phrases bien formées). Réussit pour Qwen3-0.6B, échoue pour le 1,7B | `model.gguf` |
@@ -41,3 +41,5 @@ Chaque test d'intégration fige un vrai défaut : un changement de `PROCESSOR` p
 ## Conventions
 
 Le calcul lourd passe par `spawn_blocking`. Une erreur de micro, de modèle ou de réseau n'arrête jamais le démon : on notifie la cause et on attend l'appui suivant. Les fichiers qui contiennent des clés ou du texte dicté sont créés avec `config::write_private`.
+
+**Les commentaires du code sont écrits en anglais** (commentaires de documentation, de tests et scripts de build compris). Le texte affiché à l'utilisateur n'est pas un commentaire : notifications et fenêtre de réglages passent par `t(en, fr, lang)` et existent en anglais et en français.
