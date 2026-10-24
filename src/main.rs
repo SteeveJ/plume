@@ -96,7 +96,7 @@ async fn download_model(path: &std::path::Path, url: &str, expected_sha256: Opti
     Ok(())
 }
 
-/// Charge Whisper en local : télécharge le modèle au besoin (en prévenant l'utilisateur) et refuse s'il ne tient pas en RAM.
+/// Loads Whisper locally: downloads the model if needed (telling the user) and refuses if it does not fit in RAM.
 async fn load_local_whisper(cfg: &AppConfig, vocab: adapters::stt::SharedVocab) -> Result<WhisperCpp> {
     let file = adapters::stt::whisper_cpp::ggml_file(&cfg.stt_model);
     let path = data_dir().join(&file);
@@ -115,7 +115,7 @@ async fn load_local_whisper(cfg: &AppConfig, vocab: adapters::stt::SharedVocab) 
     );
     let whisper = WhisperCpp::load(&path, &cfg.stt_lang, vocab)?;
 
-    // Détecteur de voix (moins de 1 Mo) : s'il manque, Plume continue avec ses filtres de volume.
+    // Voice detector (under 1 MB): if it is missing, Plume carries on with its volume filters.
     let vad = data_dir().join(adapters::stt::whisper_cpp::VAD_FILE);
     if !vad.exists() {
         if let Err(e) = download_model(&vad, &adapters::stt::whisper_cpp::vad_url(), None).await {
@@ -147,7 +147,7 @@ fn install_autostart() -> Result<()> {
     println!("Installed: {}", icon_rec_path.display());
     // Refresh icon theme cache — skip gracefully if tool is absent (minimal installs).
     let icon_base = PathBuf::from(&home).join(".local/share/icons/hicolor");
-    // `spawn` échoue simplement si l'outil est absent.
+    // `spawn` simply fails if the tool is absent.
     let _ = std::process::Command::new("gtk-update-icon-cache")
         .args(["-f", "-t", icon_base.to_str().unwrap_or("")]).spawn();
     let _ = std::fs::File::open(&icon_base).and_then(|f| f.set_modified(std::time::SystemTime::now()));
@@ -207,7 +207,7 @@ async fn main() -> Result<()> {
     }
     let result = run().await;
     if let Err(e) = &result {
-        // Lancé depuis l'autostart, il n'y a pas de terminal : la notification est le seul retour à l'utilisateur.
+        // Started from autostart there is no terminal: the notification is the user's only feedback.
         let msg = format!("{e:#}");
         let hint = hints::startup_hint(&msg).map(|h| format!("\n{h}")).unwrap_or_default();
         sys_notify(&format!("Plume could not start: {msg}{hint}"));
@@ -388,7 +388,7 @@ async fn run() -> Result<()> {
     let injector = ClipboardInjector::new().context("init text injector")?;
 
     let (tx, rx) = mpsc::channel();
-    let listener = EvdevListener { key: cfg.hotkey, mode: cfg.mode };
+    let listener = EvdevListener { key: cfg.hotkey, mode: cfg.mode, instruct_key: cfg.instruct_hotkey };
     thread::spawn(move || {
         if let Err(e) = listener.listen(tx) {
             tracing::error!("hotkey listener: {e}");
@@ -415,6 +415,18 @@ async fn run() -> Result<()> {
         .with_vocab(vocab)
         .with_content_guard(!needs_rewrite)
         .with_snippets(application::snippets::load());
+    if cfg.instruct_hotkey.is_some() {
+        // Instruction mode sends the selected text to an online model: the small local model rewrites too poorly.
+        let rewriter: Option<Box<dyn TextProcessor>> = match (&cfg.openai_key, &cfg.anthropic_key) {
+            (Some(k), _) => Some(Box::new(OpenAiProcessor::new(k, &cfg.openai_processor_model, config::INSTRUCT_PROMPT))),
+            (None, Some(k)) => Some(Box::new(AnthropicProcessor::new(k, &cfg.anthropic_model, config::INSTRUCT_PROMPT))),
+            (None, None) => None,
+        };
+        match rewriter {
+            Some(r) => service = service.with_instruct(Box::new(adapters::selection::PrimarySelection), r),
+            None => sys_notify("INSTRUCT_HOTKEY needs an OPENAI_API_KEY or ANTHROPIC_API_KEY: instruction mode is disabled"),
+        }
+    }
     if let Some(h) = history { service = service.with_history(h); }
     if let Some(ctx) = atspi_ctx { service = service.with_context_reader(Box::new(ctx)); }
 

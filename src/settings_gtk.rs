@@ -93,6 +93,15 @@ pub fn run_settings_window(cfg: AppConfig) {
         hotkey_cb.set_active_id(Some(format!("{:?}", cfg.hotkey).as_str()));
         row!(t("Hotkey", "Touche"), hotkey_cb);
 
+        let instruct_cb = ComboBoxText::new();
+        instruct_cb.append(Some(""), t("Disabled", "Désactivé"));
+        for (id, label) in [("KEY_RIGHTMETA", "Right Meta (Super)"), ("KEY_SCROLLLOCK", "Scroll Lock"), ("KEY_PAUSE", "Pause"), ("KEY_INSERT", "Insert"),
+            ("KEY_F7", "F7"), ("KEY_F8", "F8"), ("KEY_F9", "F9"), ("KEY_F10", "F10"), ("KEY_F11", "F11"), ("KEY_F12", "F12")] {
+            instruct_cb.append(Some(id), label);
+        }
+        instruct_cb.set_active_id(Some(&cfg.instruct_hotkey.map(|k| format!("{k:?}")).unwrap_or_default()));
+        row!(t("Instruction key (needs an OpenAI or Anthropic key)", "Touche d'instruction (clé OpenAI ou Anthropic nécessaire)"), instruct_cb);
+
         let mode_cb = ComboBoxText::new();
         mode_cb.append(Some("hold"),   t("Hold — record while key is held", "Maintien — enregistre tant que la touche est tenue"));
         mode_cb.append(Some("toggle"), t("Toggle — press once to start, again to stop", "Bascule — une pression pour démarrer, une pour arrêter"));
@@ -244,6 +253,7 @@ pub fn run_settings_window(cfg: AppConfig) {
 
             if let Some(v) = hotkey_cb.active_id()     { pairs.push(("HOTKEY", v.to_string())); }
             if let Some(v) = mode_cb.active_id()       { pairs.push(("MODE", v.to_string())); }
+            if let Some(v) = instruct_cb.active_id()   { pairs.push(("INSTRUCT_HOTKEY", v.to_string())); }
             if let Some(v) = out_cb.active_id()        { pairs.push(("OUTPUT", v.to_string())); }
             if let Some(v) = stt_cb.active_id()        { pairs.push(("STT_LANG", v.to_string())); }
             if let Some(v) = stt_model_cb.active_id()  { pairs.push(("STT_MODEL", v.to_string())); }
@@ -259,7 +269,7 @@ pub fn run_settings_window(cfg: AppConfig) {
             let om = ollama_e.text();
             if !om.is_empty() { pairs.push(("OLLAMA_MODEL", om.to_string())); }
 
-            // Met à jour champ par champ : les réglages absents du formulaire (MODEL_PATH, etc.) sont conservés.
+            // Updates field by field: settings absent from the form (MODEL_PATH, etc.) are kept.
             let path = crate::config::conf_path();
             let mut conf = std::fs::read_to_string(&path).unwrap_or_default();
             for (k, v) in &pairs { conf = crate::config::update_conf(&conf, k, v); }

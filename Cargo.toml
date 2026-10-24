@@ -57,6 +57,6 @@ strip = true
 lto = "fat"
 codegen-units = 1
 
-# whisper.cpp et llama.cpp embarquent chacun leur ggml : la copie vendorisée préfixe les symboles de celui de whisper (voir son build.rs) pour les lier dans un seul binaire.
+# whisper.cpp and llama.cpp each bundle their own ggml: the vendored copy prefixes whisper's symbols (see its build.rs) so both link into one binary.
 [patch.crates-io]
 whisper-rs-sys = { path = "vendor/whisper-rs-sys" }

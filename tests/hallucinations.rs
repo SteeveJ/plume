@@ -1,6 +1,6 @@
-//! Cas d'hallucination de Whisper : sans micro, micro coupé, bruit de fond — et le cas où l'on parle vraiment.
-//! Whisper `turbo` invente « Thank you. », des crédits de sous-titres ou un simple « . » sur du bruit
-//! (mesuré dans tests/e2e_models.rs) ; rien de tout cela ne doit atteindre le clavier, mais la même phrase dite à voix haute, si.
+//! Whisper hallucination cases: no microphone, muted microphone, background noise — and the case where one really speaks.
+//! Whisper `turbo` invents "Thank you.", subtitle credits or a lone "." on noise
+//! (measured in tests/e2e_models.rs); none of that must reach the keyboard, but the same phrase said aloud must.
 mod common;
 use common::*;
 use plume::domain::ports::stt::SpeechToText;
@@ -34,14 +34,14 @@ fn no_microphone_does_not_crash_and_nothing_is_typed() {
 
 #[test]
 fn muted_microphone_never_reaches_whisper() {
-    // Micro coupé : zéros. Le garde-fou de volume évite d'appeler Whisper, qui répondrait « Thank you. ».
+    // Muted microphone: zeros. The volume guard avoids calling Whisper, which would answer "Thank you.".
     run_case(Case { name: "micro coupé", mic: FakeMic::one(muted()), whisper_says: "Thank you.",
         typed: &[], whisper_called: false, notification: "No sound" });
 }
 
 #[test]
 fn hallucinations_on_background_noise_are_dropped() {
-    // Bruit au-dessus du seuil de silence : Whisper est appelé et invente quelque chose ; le résultat est écarté.
+    // Noise above the silence threshold: Whisper is called and invents something; the result is dropped.
     let cases = [
         ("souffle + Thank you", white_noise(0.01), "Thank you."),
         ("bourdonnement + crédits FR", hum(0.01), "Sous-titrage Société Radio-Canada"),
@@ -65,13 +65,13 @@ fn the_same_phrases_are_kept_when_the_user_really_speaks() {
 
 #[test]
 fn a_quiet_merci_is_typed_when_the_voice_detector_confirmed_speech() {
-    // Même audio faible, même texte que « bruit + Merci » (écarté) : seule la confirmation du détecteur de voix change tout.
+    // Same weak audio, same text as "noise + Merci" (dropped): only the voice detector's confirmation changes everything.
     let (stt, _) = FakeStt::confirmed("Merci.");
     let (typed, notes) = (Typed::default(), Notes::default());
     let mut svc = DictationService::new(FakeMic::one(white_noise(0.01)), stt, typed.clone(), None, Box::new(notes.clone()));
     dictate(&mut svc, 1);
     assert_eq!(typed.texts(), vec!["Merci.".to_string()], "{}", notes.all());
-    // Une ponctuation seule reste écartée même confirmée.
+    // Punctuation alone stays dropped even when confirmed.
     let (stt, _) = FakeStt::confirmed(".");
     let (typed, _) = (Typed::default(), ());
     let mut svc = DictationService::new(FakeMic::one(white_noise(0.01)), stt, typed.clone(), None, Box::new(Notes::default()));
@@ -81,7 +81,7 @@ fn a_quiet_merci_is_typed_when_the_voice_detector_confirmed_speech() {
 
 #[test]
 fn quiet_but_real_speech_is_not_mistaken_for_noise() {
-    // Voix basse (RMS 0,01) mais phrase réelle : seules les phrases inventées connues sont filtrées.
+    // Quiet voice (RMS 0.01) but a real sentence: only the known invented phrases are filtered.
     run_case(Case { name: "voix basse", mic: FakeMic::one(white_noise(0.01)), whisper_says: "Ouvre le rapport de jeudi",
         typed: &["Ouvre le rapport de jeudi"], whisper_called: true, notification: "Done" });
 }

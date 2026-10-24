@@ -17,6 +17,7 @@ use crate::domain::ports::{
     notifier::Notifier,
     processor::TextProcessor,
     scratchpad::ScratchpadWriter,
+    selection::SelectionReader,
     stt::SpeechToText,
 };
 use crate::adapters::stt::SharedVocab;
@@ -25,7 +26,24 @@ use super::snippets::{self, Snippet};
 
 const CHUNK_CHARS: usize = 350;
 
-/// Cause de l'erreur en une ligne courte, lisible dans une notification.
+/// Beyond this the selection is not sent to the online model: cost, slowness and text sent to a third party.
+const MAX_SELECTION_CHARS: usize = 20_000;
+
+/// What Whisper understood, once the safeguards have passed.
+struct Heard {
+    text: String,
+    duration_ms: u64,
+}
+
+/// Start of the text read, so the user can see what is about to be replaced.
+fn preview(text: &str) -> String {
+    let flat: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut p: String = flat.chars().take(40).collect();
+    if p.len() < flat.len() { p.push('…'); }
+    p
+}
+
+/// Cause of the error as one short line, readable in a notification.
 fn short_reason(e: &anyhow::Error) -> String {
     let full = format!("{e:#}");
     let mut s: String = full.chars().take(90).collect();
@@ -33,7 +51,7 @@ fn short_reason(e: &anyhow::Error) -> String {
     s
 }
 
-/// Coupe après une fin de phrase une fois ~350 caractères atteints ; aucun mot n'est perdu.
+/// Cuts after a sentence end once ~350 characters are reached; no word is lost.
 fn split_chunks(text: &str) -> Vec<&str> {
     let (mut chunks, mut start, mut prev) = (Vec::new(), 0, '\0');
     for (i, c) in text.char_indices() {
@@ -48,7 +66,7 @@ fn split_chunks(text: &str) -> Vec<&str> {
     chunks
 }
 
-/// Vrai si la sortie a perdu plus de 10 % des mots : le prompt "clean" demande de préserver les mots exacts (ignoré sous 12 mots).
+/// True if the output lost more than 10 % of the words: the "clean" prompt asks to preserve the exact words (ignored under 12 words).
 fn lost_content(input: &str, output: &str) -> bool {
     let (a, b) = (input.split_whitespace().count(), output.split_whitespace().count());
     a >= 12 && b * 10 < a * 9
@@ -69,6 +87,7 @@ pub struct DictationService<R, S, I> {
     vocab: Option<SharedVocab>,
     snippets: Vec<Snippet>,
     content_guard: bool,
+    instruct: Option<(Box<dyn SelectionReader>, Box<dyn TextProcessor>)>,
 }
 
 impl<R, S, I> DictationService<R, S, I>
@@ -96,6 +115,7 @@ where
             vocab: None,
             snippets: Vec::new(),
             content_guard: true,
+            instruct: None,
         }
     }
 
@@ -105,8 +125,13 @@ where
     pub fn with_state_tx(mut self, tx: SyncSender<bool>) -> Self { self.state_tx = Some(tx); self }
     pub fn with_output(mut self, m: OutputMode) -> Self { self.output = m; self }
     pub fn with_ui_lang(mut self, l: UiLang) -> Self { self.ui_lang = l; self }
-    /// Désactiver pour les styles qui reformulent (le texte peut alors raccourcir légitimement).
+    /// Turn off for styles that rewrite (the text may then legitimately get shorter).
     pub fn with_content_guard(mut self, on: bool) -> Self { self.content_guard = on; self }
+    /// Enables instruction mode: `selection` reads the selected text, `rewriter` (an online model) rewrites it.
+    pub fn with_instruct(mut self, selection: Box<dyn SelectionReader>, rewriter: Box<dyn TextProcessor>) -> Self {
+        self.instruct = Some((selection, rewriter));
+        self
+    }
     pub fn with_snippets(mut self, s: Vec<Snippet>) -> Self { self.snippets = s; self }
     pub fn with_vocab(mut self, v: SharedVocab) -> Self { self.vocab = Some(v); self }
 
@@ -116,20 +141,46 @@ where
         std::thread::spawn(move || { for e in events { let _ = etx.send(e); } });
 
         let mut recording = false;
+        // `Some` while the user is dictating an instruction: the text that was selected at that moment.
+        let mut instruct_selection: Option<String> = None;
         loop {
             let event = match erx.recv().await { Some(e) => e, None => break };
             match event {
                 HotkeyEvent::RecordStart if !recording => {
                     recording = self.begin_recording();
                 }
-                HotkeyEvent::RecordStop if recording => {
+                HotkeyEvent::RecordStop if recording && instruct_selection.is_none() => {
                     recording = false;
                     self.set_state(false);
                     // Race transcription against a new RecordStart (cancel & restart).
-                    // `biased` : la transcription est sondée d'abord, sinon un canal déjà fermé pouvait l'annuler avant qu'elle démarre.
+                    // `biased`: the transcription is polled first, otherwise an already closed channel could cancel it before it starts.
                     tokio::select! {
                         biased;
                         _ = self.handle_record_stop() => {}
+                        next = erx.recv() => {
+                            if let Some(HotkeyEvent::RecordStart) = next {
+                                recording = self.begin_recording();
+                            }
+                        }
+                    }
+                }
+                HotkeyEvent::InstructStart if !recording && self.instruct.is_some() => {
+                    if let Some(selection) = self.read_selection() {
+                        recording = self.begin_recording();
+                        if recording {
+                            self.notifier.notify(&format!("{} « {} » — {}", t("✎ Rewriting", "✎ Réécriture de", self.ui_lang),
+                                preview(&selection), t("say what to do with it", "dites ce qu'il faut en faire", self.ui_lang)));
+                            instruct_selection = Some(selection);
+                        }
+                    }
+                }
+                HotkeyEvent::InstructStop if recording && instruct_selection.is_some() => {
+                    recording = false;
+                    self.set_state(false);
+                    let selection = instruct_selection.take().unwrap_or_default();
+                    tokio::select! {
+                        biased;
+                        _ = self.handle_instruct_stop(selection) => {}
                         next = erx.recv() => {
                             if let Some(HotkeyEvent::RecordStart) = next {
                                 recording = self.begin_recording();
@@ -143,7 +194,29 @@ where
         Ok(())
     }
 
-    /// Démarre l'enregistrement. Une panne de micro (casque débranché, micro occupé) ne doit pas arrêter le démon : on prévient et on attend la touche suivante.
+    /// Reads the desktop selection. `None` (with a notification) if nothing is selected or the text is too long.
+    fn read_selection(&self) -> Option<String> {
+        let (reader, _) = self.instruct.as_ref()?;
+        match reader.selected_text() {
+            Ok(Some(s)) if s.chars().count() <= MAX_SELECTION_CHARS => Some(s),
+            Ok(Some(_)) => {
+                self.notifier.notify(t("✗ Selection too long (20 000 characters at most)", "✗ Sélection trop longue (20 000 caractères au plus)", self.ui_lang));
+                None
+            }
+            Ok(None) => {
+                self.notifier.notify(t("✗ Select the text to change first", "✗ Sélectionnez d'abord le texte à modifier", self.ui_lang));
+                None
+            }
+            Err(e) => {
+                tracing::error!("cannot read the selection: {e:#}");
+                let msg = format!("{} {}", t("✗ Cannot read the selection:", "✗ Lecture de la sélection impossible :", self.ui_lang), short_reason(&e));
+                self.notifier.notify(&msg);
+                None
+            }
+        }
+    }
+
+    /// Starts recording. A microphone failure (headset unplugged, microphone busy) must not stop the daemon: tell the user and wait for the next key press.
     fn begin_recording(&mut self) -> bool {
         match self.recorder.start() {
             Ok(()) => {
@@ -162,43 +235,49 @@ where
         }
     }
 
-    async fn handle_record_stop(&mut self) {
+    /// Stops recording and returns what Whisper understood. Refusals (too short, muted microphone, nothing heard, failure) notify by themselves.
+    async fn hear(&mut self) -> Option<Heard> {
         let audio = match self.recorder.stop() {
             Ok(a) => a,
-            Err(e) => { tracing::error!("stop error: {e}"); return; }
+            Err(e) => { tracing::error!("stop error: {e}"); return None; }
         };
 
         if audio.duration().as_millis() < 300 {
             tracing::warn!("audio too short, skipping");
             self.notifier.notify(t("✗ Too short", "✗ Trop court", self.ui_lang));
-            return;
+            return None;
         }
 
-        // Micro coupé ou débranché : RMS quasi nul. Sans ce garde-fou Whisper invente du texte sur le silence.
+        // Muted or unplugged microphone: RMS almost zero. Without this guard Whisper invents text on silence.
         let rms = hallucination::rms(&audio.samples);
         if rms < 0.005 {
             tracing::warn!("audio too quiet (rms={rms:.4}), skipping — mic disconnected?");
             self.notifier.notify(t("✗ No sound — is the microphone muted?", "✗ Aucun son — le micro est-il coupé ?", self.ui_lang));
-            return;
+            return None;
         }
 
         self.notifier.notify(t("⏳ Transcribing…", "⏳ Transcription…", self.ui_lang));
         tracing::info!("transcribing ({:.1}s)…", audio.duration().as_secs_f64());
 
-        let raw = match self.stt.transcribe(&audio).await {
+        let text = match self.stt.transcribe(&audio).await {
             Ok(heard) if !heard.text.is_empty() && !hallucination::is_hallucination(&heard.text, rms, heard.speech_confirmed) => heard.text,
             Ok(heard) => {
                 tracing::warn!("nothing usable heard (rms={rms:.4}, whisper said {:?})", heard.text);
                 self.notifier.notify(t("✗ Nothing heard — speak closer to the mic", "✗ Rien entendu — parlez plus près du micro", self.ui_lang));
-                return;
+                return None;
             }
             Err(e) => {
                 tracing::error!("STT error: {e:#}");
                 let msg = format!("{} {}", t("✗ Speech recognition failed:", "✗ Échec de la reconnaissance vocale :", self.ui_lang), short_reason(&e));
                 self.notifier.notify(&msg);
-                return;
+                return None;
             }
         };
+        Some(Heard { text, duration_ms: audio.duration().as_millis() as u64 })
+    }
+
+    async fn handle_record_stop(&mut self) {
+        let Some(Heard { text: raw, duration_ms }) = self.hear().await else { return };
 
         // Vocab learning and LLM processing are independent — run them in parallel.
         let vocab_task = self.vocab.as_ref().map(|vocab| {
@@ -225,7 +304,7 @@ where
         let text = snippets::expand(&text, &self.snippets);
 
         if let Some(h) = &mut self.history {
-            if let Err(e) = h.save(&raw, &text, audio.duration().as_millis() as u64) {
+            if let Err(e) = h.save(&raw, &text, duration_ms) {
                 tracing::warn!("history save error: {e}");
             }
         }
@@ -243,7 +322,31 @@ where
         self.notifier.notify(t("✓ Done", "✓ Fait", self.ui_lang));
     }
 
-    /// Corrige par morceaux (un petit LLM saute des passages sur les longs textes) et garde le texte brut d'un morceau si la correction perd du contenu.
+    /// Instruction spoken over a selected text: the online model rewrites the selection and the result replaces it (pasted over it).
+    /// If the model fails or returns nothing, nothing is pasted: the user's text stays intact.
+    async fn handle_instruct_stop(&mut self, selection: String) {
+        let Some(heard) = self.hear().await else { return };
+        let Some((_, rewriter)) = &self.instruct else { return };
+        self.notifier.notify(t("⏳ Rewriting…", "⏳ Réécriture…", self.ui_lang));
+        let result = rewriter.process(&format!("Instruction: {}\n\nText:\n{selection}", heard.text)).await;
+        match result {
+            Ok(out) if !out.trim().is_empty() => {
+                if let Some(h) = &mut self.history {
+                    if let Err(e) = h.save(&format!("[instruction] {}", heard.text), &out, heard.duration_ms) { tracing::warn!("history save error: {e}"); }
+                }
+                self.do_inject(&out);
+                self.notifier.notify(t("✓ Text rewritten — Ctrl+Z to undo", "✓ Texte réécrit — Ctrl+Z pour annuler", self.ui_lang));
+            }
+            Ok(_) => self.notifier.notify(t("✗ The model returned nothing — your text is unchanged", "✗ Le modèle n'a rien rendu — votre texte est inchangé", self.ui_lang)),
+            Err(e) => {
+                tracing::error!("instruction failed: {e:#}");
+                let msg = format!("{} {}", t("✗ Rewrite failed:", "✗ Réécriture impossible :", self.ui_lang), short_reason(&e));
+                self.notifier.notify(&msg);
+            }
+        }
+    }
+
+    /// Corrects in chunks (a small LLM skips passages on long texts) and keeps a chunk's raw text if the correction loses content.
     async fn run_processor(&self, p: &dyn TextProcessor, raw: &str, ctx: Option<&str>) -> String {
         let chunks = if self.content_guard { split_chunks(raw) } else { vec![raw.trim()] };
         let mut out = Vec::with_capacity(chunks.len());
@@ -393,6 +496,124 @@ mod tests {
         notifier.expect_notify().return_const(());
         let mut svc = DictationService::new(rec, stt, inj, None, Box::new(notifier));
         run(&mut svc, vec![HotkeyEvent::RecordStart, HotkeyEvent::RecordStop]);
+    }
+
+    // ---- mode instruction ----
+
+    use crate::domain::ports::selection::MockSelectionReader;
+
+    /// Instruction-mode test service: microphone and Whisper simulated, selection and online model provided by the caller.
+    fn instruct_service(
+        selection: MockSelectionReader,
+        rewriter: MockTextProcessor,
+        inj: MockTextInjector,
+        notifier: MockNotifier,
+        starts: usize,
+    ) -> DictationService<MockAudioRecorder, MockSpeechToText, MockTextInjector> {
+        let mut rec = MockAudioRecorder::new();
+        rec.expect_start().times(starts).returning(|| Ok(()));
+        rec.expect_stop().returning(|| Ok(samples(1.0)));
+        let mut stt = MockSpeechToText::new();
+        stt.expect_warm().return_const(());
+        stt.expect_transcribe().returning(|_| Ok(Transcription { text: "mets-le au pluriel".into(), ..Default::default() }));
+        DictationService::new(rec, stt, inj, None, Box::new(notifier))
+            .with_instruct(Box::new(selection), Box::new(rewriter))
+    }
+
+    fn selecting(text: Option<&'static str>) -> MockSelectionReader {
+        let mut sel = MockSelectionReader::new();
+        sel.expect_selected_text().returning(move || Ok(text.map(String::from)));
+        sel
+    }
+
+    fn quiet_notifier() -> MockNotifier {
+        let mut n = MockNotifier::new();
+        n.expect_notify().return_const(());
+        n
+    }
+
+    #[test]
+    fn instruction_rewrites_the_selection_with_the_spoken_order() {
+        let mut rewriter = MockTextProcessor::new();
+        rewriter.expect_process()
+            .withf(|input| input.contains("Instruction: mets-le au pluriel") && input.contains("Text:\nLe chat dort."))
+            .times(1)
+            .returning(|_| Ok("Les chats dorment.".into()));
+        let mut inj = MockTextInjector::new();
+        inj.expect_inject().with(eq("Les chats dorment.")).times(1).returning(|_| Ok(()));
+        let mut svc = instruct_service(selecting(Some("Le chat dort.")), rewriter, inj, quiet_notifier(), 1);
+        // A stray release of the dictation key during the instruction must change nothing.
+        run(&mut svc, vec![HotkeyEvent::InstructStart, HotkeyEvent::RecordStop, HotkeyEvent::InstructStop]);
+    }
+
+    #[test]
+    fn nothing_selected_means_no_recording_and_a_clear_message() {
+        let mut rewriter = MockTextProcessor::new();
+        rewriter.expect_process().never();
+        let mut inj = MockTextInjector::new();
+        inj.expect_inject().never();
+        let mut notifier = MockNotifier::new();
+        notifier.expect_notify().withf(|m| m.contains("Select the text")).times(1).return_const(());
+        let mut svc = instruct_service(selecting(None), rewriter, inj, notifier, 0);
+        run(&mut svc, vec![HotkeyEvent::InstructStart, HotkeyEvent::InstructStop]);
+    }
+
+    #[test]
+    fn a_failing_model_never_touches_the_users_text() {
+        let mut rewriter = MockTextProcessor::new();
+        rewriter.expect_process().returning(|_| Err(anyhow::anyhow!("HTTP 401 invalid api key")));
+        let mut inj = MockTextInjector::new();
+        inj.expect_inject().never();
+        let mut notifier = MockNotifier::new();
+        notifier.expect_notify().withf(|m| m.contains("Rewrite failed") && m.contains("invalid api key")).times(1).return_const(());
+        notifier.expect_notify().return_const(());
+        let mut svc = instruct_service(selecting(Some("Le chat dort.")), rewriter, inj, notifier, 1);
+        run(&mut svc, vec![HotkeyEvent::InstructStart, HotkeyEvent::InstructStop]);
+    }
+
+    #[test]
+    fn an_empty_answer_never_replaces_the_selection() {
+        let mut rewriter = MockTextProcessor::new();
+        rewriter.expect_process().returning(|_| Ok("  \n".into()));
+        let mut inj = MockTextInjector::new();
+        inj.expect_inject().never();
+        let mut notifier = MockNotifier::new();
+        notifier.expect_notify().withf(|m| m.contains("returned nothing")).times(1).return_const(());
+        notifier.expect_notify().return_const(());
+        let mut svc = instruct_service(selecting(Some("Le chat dort.")), rewriter, inj, notifier, 1);
+        run(&mut svc, vec![HotkeyEvent::InstructStart, HotkeyEvent::InstructStop]);
+    }
+
+    #[test]
+    fn a_huge_selection_is_not_sent_to_a_third_party() {
+        let huge: &'static str = Box::leak("mot ".repeat(6_000).into_boxed_str());
+        let mut rewriter = MockTextProcessor::new();
+        rewriter.expect_process().never();
+        let mut inj = MockTextInjector::new();
+        inj.expect_inject().never();
+        let mut notifier = MockNotifier::new();
+        notifier.expect_notify().withf(|m| m.contains("too long")).times(1).return_const(());
+        let mut svc = instruct_service(selecting(Some(huge)), rewriter, inj, notifier, 0);
+        run(&mut svc, vec![HotkeyEvent::InstructStart, HotkeyEvent::InstructStop]);
+    }
+
+    #[test]
+    fn without_an_online_model_the_instruction_key_does_nothing() {
+        let mut rec = MockAudioRecorder::new();
+        rec.expect_start().never();
+        let stt = MockSpeechToText::new();
+        let mut inj = MockTextInjector::new();
+        inj.expect_inject().never();
+        let mut svc = DictationService::new(rec, stt, inj, None, Box::new(MockNotifier::new()));
+        run(&mut svc, vec![HotkeyEvent::InstructStart, HotkeyEvent::InstructStop]);
+    }
+
+    #[test]
+    fn preview_is_one_short_line() {
+        assert_eq!(preview("Le chat\n  dort."), "Le chat dort.");
+        let long = preview(&"abcdefghij ".repeat(10));
+        assert_eq!(long.chars().count(), 41);
+        assert!(long.ends_with('…'));
     }
 
     #[test]

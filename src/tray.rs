@@ -189,7 +189,7 @@ mod tests {
         for (name, bytes) in [("idle", &include_bytes!("../assets/plume-idle.png")[..]), ("recording", &include_bytes!("../assets/plume-recording.png")[..])] {
             let icon = png_to_icon(bytes).unwrap_or_else(|| panic!("{name} ne se décode pas"));
             assert_eq!((icon.width, icon.height), (256, 256), "{name}");
-            // `data` est de l'ARGB : l'octet alpha est le premier de chaque pixel.
+            // `data` is ARGB: the alpha byte is the first of each pixel.
             assert!(icon.data.chunks_exact(4).all(|px| px[0] == 255), "{name} contient des pixels transparents");
         }
     }

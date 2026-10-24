@@ -4,7 +4,7 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 use crate::config::APP_NAME;
 
-/// Pids des démons Plume (hors fenêtre de réglages, hors assistant de redémarrage et hors `me`).
+/// Pids of Plume daemons (excluding the settings window, the restart helper and `me`).
 pub fn find_daemon_pids(proc_root: &Path, me: u32) -> Vec<u32> {
     let Ok(entries) = std::fs::read_dir(proc_root) else { return Vec::new() };
     entries.flatten().filter_map(|e| {
@@ -18,7 +18,7 @@ pub fn find_daemon_pids(proc_root: &Path, me: u32) -> Vec<u32> {
     }).collect()
 }
 
-/// Lance l'assistant `plume --restart` (sans shell) ; il arrête le démon puis en relance un neuf.
+/// Starts the `plume --restart` helper (no shell); it stops the daemon then starts a fresh one.
 pub fn request_restart() {
     if let Ok(exe) = std::env::current_exe() {
         let _ = Command::new(exe).arg("--restart")
@@ -26,12 +26,12 @@ pub fn request_restart() {
     }
 }
 
-/// Arrête l'ancien démon (SIGTERM, puis SIGKILL après 3 s) et démarre la même version du programme.
+/// Stops the old daemon (SIGTERM, then SIGKILL after 3 s) and starts the same version of the program.
 pub fn restart_daemon() -> Result<()> {
     let proc_root = Path::new("/proc");
     let pids = find_daemon_pids(proc_root, std::process::id());
     for pid in &pids {
-        // SAFETY: simple appel système `kill` sur un pid numérique.
+        // SAFETY: plain `kill` system call on a numeric pid.
         unsafe { libc::kill(*pid as i32, libc::SIGTERM); }
     }
     let deadline = Instant::now() + Duration::from_secs(3);

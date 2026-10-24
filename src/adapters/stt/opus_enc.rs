@@ -4,14 +4,14 @@ use opus::{Application, Bitrate, Channels, Encoder};
 use crate::domain::model::AudioSamples;
 use super::audio_util::{to_mono_16k, RATE};
 
-const FRAME: usize = 320; // 20 ms à 16 kHz
+const FRAME: usize = 320; // 20 ms at 16 kHz
 const SERIAL: u32 = 0x504c_554d;
 
 pub fn encode_ogg_opus(audio: &AudioSamples) -> Result<Vec<u8>> {
     let pcm = to_mono_16k(audio);
     let mut enc = Encoder::new(RATE, Channels::Mono, Application::Voip).context("opus encoder")?;
     enc.set_bitrate(Bitrate::Bits(24_000)).context("opus bitrate")?;
-    let pre_skip = enc.get_lookahead().context("opus lookahead")? as u16 * 3; // en unités 48 kHz
+    let pre_skip = enc.get_lookahead().context("opus lookahead")? as u16 * 3; // in 48 kHz units
 
     let mut out = Vec::new();
     let mut w = PacketWriter::new(&mut out);

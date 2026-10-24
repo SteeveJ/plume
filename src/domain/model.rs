@@ -21,7 +21,7 @@ impl AudioSamples {
 #[derive(Debug, Clone, Default)]
 pub struct Transcription {
     pub text: String,
-    /// Un détecteur de voix a confirmé de la parole humaine dans l'audio (faux pour les moteurs qui n'en ont pas).
+    /// A voice detector confirmed human speech in the audio (false for engines that have none).
     pub speech_confirmed: bool,
 }
 
@@ -29,4 +29,7 @@ pub struct Transcription {
 pub enum HotkeyEvent {
     RecordStart,
     RecordStop,
+    /// Second key (instruction mode): pressed, then released.
+    InstructStart,
+    InstructStop,
 }

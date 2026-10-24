@@ -22,17 +22,17 @@ pub fn ggml_url(file: &str) -> String {
     format!("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{file}")
 }
 
-/// Détecteur de voix Silero (moins de 1 Mo) : distingue la parole du bruit avant Whisper (ADR 0014).
+/// Silero voice detector (under 1 MB): tells speech from noise before Whisper (ADR 0014).
 pub const VAD_FILE: &str = "ggml-silero-v5.1.2.bin";
 
 pub fn vad_url() -> String {
     format!("https://huggingface.co/ggml-org/whisper-vad/resolve/main/{VAD_FILE}")
 }
 
-/// Marge gardée autour de la parole détectée : 0,25 s, pour ne pas couper le début ni la fin des mots.
+/// Margin kept around the detected speech: 0.25 s, so word starts and ends are not cut.
 const VAD_PAD: usize = 4_000;
 
-/// Le modèle (+ tampons de calcul, ~0,6 à 0,9 Go pour `small`) est libéré après cette durée sans dictée.
+/// The model (+ compute buffers, ~0.6 to 0.9 GB for `small`) is freed after this long without dictation.
 const IDLE_UNLOAD: Duration = Duration::from_secs(300);
 
 struct Loaded {
@@ -63,7 +63,7 @@ impl Inner {
     }
 }
 
-/// Sans détecteur de voix Plume reste utilisable : les filtres de volume et de phrases inventées prennent le relais.
+/// Without the voice detector Plume stays usable: the volume and invented-phrase filters take over.
 fn load_vad(path: &Path) -> Option<WhisperVadContext> {
     let mut params = WhisperVadContextParams::new();
     params.set_use_gpu(false);
@@ -72,13 +72,13 @@ fn load_vad(path: &Path) -> Option<WhisperVadContext> {
         .ok()
 }
 
-/// Zone de parole (en centisecondes, telle que la rend le détecteur) élargie de `VAD_PAD` échantillons, bornée à l'audio.
+/// Speech zone (in centiseconds, as the detector reports it) widened by `VAD_PAD` samples and clamped to the audio.
 fn padded_range(first_start_cs: f32, last_end_cs: f32, len: usize) -> Range<usize> {
     let to_samples = |cs: f32| (cs.max(0.0) * 160.0) as usize;
     to_samples(first_start_cs).saturating_sub(VAD_PAD).min(len)..(to_samples(last_end_cs) + VAD_PAD).min(len)
 }
 
-/// `None` = aucune parole dans l'audio.
+/// `None` = no speech in the audio.
 fn detect_speech(vad: &mut WhisperVadContext, pcm: &[f32]) -> Result<Option<Range<usize>>> {
     let segments = vad.segments_from_samples(WhisperVadParams::new(), pcm).context("voice detection")?;
     let n = segments.num_segments();
@@ -87,13 +87,13 @@ fn detect_speech(vad: &mut WhisperVadContext, pcm: &[f32]) -> Result<Option<Rang
     Ok(first.zip(last).map(|(f, l)| padded_range(f.start, l.end, pcm.len())))
 }
 
-/// Whisper en processus (whisper.cpp) : aucun Python ni serveur externe.
+/// Whisper in-process (whisper.cpp): no Python and no external server.
 pub struct WhisperCpp {
     inner: Arc<Inner>,
 }
 
 impl WhisperCpp {
-    /// Charge le modèle tout de suite (échec rapide : l'appelant peut basculer sur OpenAI), puis le décharge après `IDLE_UNLOAD` d'inactivité.
+    /// Loads the model right away (fail fast: the caller can fall back to OpenAI), then unloads it after `IDLE_UNLOAD` of inactivity.
     pub fn load(model_path: &std::path::Path, lang: impl Into<String>, prompt: SharedVocab) -> Result<Self> {
         let inner = Arc::new(Inner {
             model_path: model_path.to_path_buf(),
@@ -118,8 +118,8 @@ impl WhisperCpp {
         Ok(Self { inner })
     }
 
-    /// Active le détecteur de voix : sans parole dans l'audio, Whisper n'est pas appelé (donc rien d'inventé) ;
-    /// sinon seule la zone de parole lui est envoyée.
+    /// Enables the voice detector: with no speech in the audio Whisper is not called (so nothing is invented);
+    /// otherwise only the speech zone is sent to it.
     pub fn with_vad(self, vad_model: &Path) -> Self {
         *self.inner.vad_path.lock().unwrap() = Some(vad_model.to_path_buf());
         if let Some(loaded) = self.inner.loaded.lock().unwrap().as_mut() {
@@ -142,7 +142,7 @@ impl WhisperCpp {
 #[async_trait]
 impl SpeechToText for WhisperCpp {
     fn warm(&self) {
-        // Déjà chargé, ou occupé à transcrire : rien à faire (évite d'empiler des threads derrière le verrou).
+        // Already loaded, or busy transcribing: nothing to do (avoids piling threads behind the lock).
         if self.inner.loaded.try_lock().map_or(true, |s| s.is_some()) { return; }
         let inner = self.inner.clone();
         std::thread::spawn(move || {
@@ -156,7 +156,7 @@ impl SpeechToText for WhisperCpp {
         let pcm = to_mono_16k(audio);
         let inner = self.inner.clone();
         let prompt = inner.prompt.lock().unwrap().clone();
-        // Hors du thread async : la boucle de dictée reste libre de voir une nouvelle pression de touche pendant le calcul.
+        // Off the async thread: the dictation loop stays free to see a new key press during the computation.
         tokio::task::spawn_blocking(move || inner.run(&pcm, &prompt)).await.context("whisper task")?
     }
 }
@@ -179,7 +179,7 @@ impl Inner {
         };
 
         let mut p = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-        // "auto" = détection de la langue ; sans lui whisper.cpp suppose l'anglais.
+        // "auto" = language detection; without it whisper.cpp assumes English.
         p.set_language(Some(if self.lang.is_empty() { "auto" } else { &self.lang }));
         if !prompt.is_empty() { p.set_initial_prompt(prompt); }
         p.set_n_threads(self.threads);
@@ -200,7 +200,7 @@ impl Inner {
             if !is_non_speech_tag(&t) { text.push_str(&t); }
         }
         loaded.last_used = Instant::now();
-        // Whisper marque le silence/bruit par un no_speech_prob élevé : on écarte ces hallucinations.
+        // Whisper flags silence/noise with a high no_speech_prob: drop those hallucinations.
         if n > 0 && no_speech / n as f32 > 0.6 {
             tracing::debug!("whisper: no_speech_prob={:.2} — discarding as silence/noise", no_speech / n as f32);
             return Ok(Transcription::default());
@@ -209,14 +209,14 @@ impl Inner {
     }
 }
 
-/// whisper.cpp écrit `[BLANK_AUDIO]`, `[MUSIC]`, `(silence)`… pour ce qui n'est pas de la parole : ces balises ne doivent jamais être tapées dans un document.
+/// whisper.cpp writes `[BLANK_AUDIO]`, `[MUSIC]`, `(silence)`… for what is not speech: these tags must never be typed into a document.
 fn is_non_speech_tag(segment: &str) -> bool {
     let t = segment.trim();
     let wrapped = (t.starts_with('[') && t.ends_with(']')) || (t.starts_with('(') && t.ends_with(')'));
     t.is_empty() || wrapped || t.chars().all(|c| matches!(c, '♪' | '♫' | ' ' | '-'))
 }
 
-/// Threads de calcul : trois quarts des cœurs (2 au minimum, 8 au maximum) pour que le bureau reste fluide pendant une longue dictée.
+/// Compute threads: three quarters of the cores (2 minimum, 8 maximum) so the desktop stays smooth during a long dictation.
 pub fn compute_threads(cores: usize) -> i32 {
     (cores * 3 / 4).clamp(2, 8) as i32
 }
@@ -252,7 +252,7 @@ mod tests {
 
     #[test]
     fn speech_zone_is_padded_and_never_leaves_the_audio() {
-        // Parole de 1,0 s à 2,0 s (centisecondes 100 à 200) dans 5 s d'audio : 0,25 s de marge de chaque côté.
+        // Speech from 1.0 s to 2.0 s (centiseconds 100 to 200) in 5 s of audio: 0.25 s of margin on each side.
         assert_eq!(padded_range(100.0, 200.0, 80_000), 12_000..36_000);
         assert_eq!(padded_range(5.0, 380.0, 64_000), 0..64_000, "bornée au début et à la fin");
         assert_eq!(padded_range(-3.0, 10.0, 64_000), 0..5_600);
@@ -276,7 +276,7 @@ mod tests {
         kb / 1024
     }
 
-    /// Test avec un vrai modèle : `PLUME_TEST_GGML=/chemin/ggml-tiny.bin cargo test --release -- --ignored whisper_memory`
+    /// Test with a real model: `PLUME_TEST_GGML=/path/ggml-tiny.bin cargo test --release -- --ignored whisper_memory`
     #[tokio::test(flavor = "multi_thread")]
     #[ignore]
     async fn whisper_memory_is_released_on_unload_and_restored_by_warm() {
@@ -294,7 +294,7 @@ mod tests {
         w.warm();
         for _ in 0..100 { if w.is_loaded() { break; } std::thread::sleep(Duration::from_millis(100)); }
         assert!(w.is_loaded(), "warm() doit recharger le modèle");
-        w.warm(); // déjà chargé : ne doit rien empiler ni bloquer
+        w.warm(); // already loaded: must neither pile up nor block
         assert_eq!(w.transcribe(&silence).await.unwrap().text, "");
     }
 }

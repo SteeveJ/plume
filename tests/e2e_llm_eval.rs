@@ -1,8 +1,8 @@
-//! Évaluation du LLM de correction sur du français dicté (ignoré par défaut) :
+//! Evaluation of the correction LLM on dictated French (ignored by default):
 //!   PLUME_TEST_GGUF=/chemin/model.gguf cargo test --release --test e2e_llm_eval -- --ignored --nocapture   (+ --features cuda)
-//! Douze cas : six phrases courtes et trois paragraphes longs, chacun sous forme dégradée (minuscules, sans ponctuation
-//! ni accents) puis déjà ponctuée par Whisper. Sert à juger un autre modèle ou un changement de prompt : voir ADR 0004.
-//! Barre minimale, mesurée sur Qwen3-0.6B : jamais de sortie vide, jamais un mot changé, au moins 8 phrases bien formées sur 12.
+//! Twelve cases: six short sentences and three long paragraphs, each degraded (lowercase, no punctuation
+//! or accents) then already punctuated by Whisper. Used to judge another model or a prompt change: see ADR 0004.
+//! Minimum bar, measured on Qwen3-0.6B: never an empty output, never a changed word, at least 8 well-formed sentences out of 12.
 mod common;
 use common::*;
 use plume::adapters::processor::LocalProcessor;

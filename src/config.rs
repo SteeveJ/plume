@@ -49,6 +49,13 @@ PROCESSOR_STYLE=clean
 # Ollama (used when PROCESSOR=ollama, must be running on localhost:11434)
 #OLLAMA_MODEL=qwen3:0.6b
 
+# --- Instruction mode (optional) ---
+# Select text in any app, hold this key and say what to do with it ('make it more formal', 'translate to English').
+# Plume rewrites the selection with an online model and pastes the result over it (Ctrl+Z undoes it).
+# Needs OPENAI_API_KEY or ANTHROPIC_API_KEY: the selected text is sent to that service. Leave empty to disable.
+# Must be a different key from HOTKEY. Same values as HOTKEY.
+INSTRUCT_HOTKEY=
+
 # --- Output ---
 # Where to send the transcribed text.
 # Values: inject (paste in focused window) | scratchpad (append to file + clipboard) | both
@@ -72,7 +79,7 @@ pub fn conf_path() -> PathBuf {
     PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".config").join(format!("{APP_NAME}.conf"))
 }
 
-/// Écrit un fichier lisible par son seul propriétaire (clés d'API, historique des dictées).
+/// Writes a file readable by its owner only (API keys, dictation history).
 pub fn write_private(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
     use std::io::Write;
     use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
@@ -81,7 +88,7 @@ pub fn write_private(path: &std::path::Path, contents: &str) -> std::io::Result<
     f.write_all(contents.as_bytes())
 }
 
-/// Crée le dossier de données en 0700 et resserre un dossier existant.
+/// Creates the data folder as 0700 and tightens an existing one.
 pub fn ensure_data_dir() -> PathBuf {
     use std::os::unix::fs::PermissionsExt;
     let dir = data_dir();
@@ -90,7 +97,7 @@ pub fn ensure_data_dir() -> PathBuf {
     dir
 }
 
-/// Resserre un fichier existant en 0600 (les fichiers créés avant ce correctif étaient lisibles par tous).
+/// Tightens an existing file to 0600 (files created before this fix were readable by everyone).
 pub fn restrict_file(path: &std::path::Path) {
     use std::os::unix::fs::PermissionsExt;
     if path.exists() {
@@ -98,7 +105,7 @@ pub fn restrict_file(path: &std::path::Path) {
     }
 }
 
-/// Remplace la valeur de `key` (clé exacte) ou l'ajoute ; le reste du fichier est conservé.
+/// Replaces the value of `key` (exact key) or adds it; the rest of the file is kept.
 pub fn update_conf(contents: &str, key: &str, value: &str) -> String {
     let new_line = format!("{key}={value}");
     let (mut out, mut done) = (Vec::new(), false);
@@ -112,7 +119,7 @@ pub fn update_conf(contents: &str, key: &str, value: &str) -> String {
     out.join("\n") + "\n"
 }
 
-/// Met à jour une clé du fichier de config sans toucher aux autres réglages.
+/// Updates one key of the config file without touching the other settings.
 pub fn set_conf_key(key: &str, value: &str) {
     let path = conf_path();
     let existing = std::fs::read_to_string(&path).unwrap_or_default();
@@ -122,10 +129,10 @@ pub fn set_conf_key(key: &str, value: &str) {
 const KNOWN_KEYS: &[&str] = &[
     "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "HOTKEY", "MODE", "OLLAMA_MODEL", "OPENAI_PROCESSOR_MODEL",
     "ANTHROPIC_MODEL", "MODEL_PATH", "MODEL_URL", "MODEL_SHA256", "MODEL_REPO", "MODEL_PATTERN", "PROCESSOR",
-    "OUTPUT", "STT_LANG", "STT_MODEL", "STT_PROMPT", "APP_LANG", "PROCESSOR_STYLE",
+    "OUTPUT", "STT_LANG", "STT_MODEL", "STT_PROMPT", "APP_LANG", "PROCESSOR_STYLE", "INSTRUCT_HOTKEY",
 ];
 
-/// Repère les fautes de frappe qui seraient sinon ignorées en silence (ex. `PROCESSOR=olama` retombe sur le LLM local et lance un téléchargement).
+/// Spots typos that would otherwise be silently ignored (e.g. `PROCESSOR=olama` falls back to the local LLM and starts a download).
 pub fn conf_warnings(contents: &str) -> Vec<String> {
     let choices: &[(&str, &[&str])] = &[
         ("MODE", &["hold", "toggle"]),
@@ -148,11 +155,16 @@ pub fn conf_warnings(contents: &str) -> Vec<String> {
             out.push(format!("line {n}: unknown setting {k}"));
         } else if let Some((_, ok)) = choices.iter().find(|(name, _)| *name == k) {
             if !ok.contains(&v) { out.push(format!("line {n}: {k}={v} is not valid (use: {})", ok.join(", "))); }
-        } else if k == "HOTKEY" && parse_key(v).is_err() {
-            out.push(format!("line {n}: HOTKEY={v} is not a supported key"));
+        } else if (k == "HOTKEY" || (k == "INSTRUCT_HOTKEY" && !v.is_empty())) && parse_key(v).is_err() {
+            out.push(format!("line {n}: {k}={v} is not a supported key"));
         } else if k == "STT_MODEL" && !v.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c)) {
             out.push(format!("line {n}: STT_MODEL={v} is not a valid model name"));
         }
+    }
+    let value_of = |key: &str| contents.lines().filter(|l| !l.trim_start().starts_with('#')).filter_map(|l| l.split_once('='))
+        .find(|(k, _)| k.trim() == key).map(|(_, v)| v.trim().to_string());
+    if let (Some(a), Some(b)) = (value_of("HOTKEY"), value_of("INSTRUCT_HOTKEY")) {
+        if !b.is_empty() && a == b { out.push(format!("INSTRUCT_HOTKEY must differ from HOTKEY ({a})")); }
     }
     out
 }
@@ -190,10 +202,15 @@ majuscules aux noms propres et en début de phrase ; \
 apostrophe typographique (') et non droite (') ; \
 trait d'union dans les nombres composés (vingt-deux, quatre-vingts) et les mots composés.";
 
-/// Styles de réécriture (le vide = correction seule). `clean` corrige sans reformuler ; les autres reformulent et demandent un LLM en ligne.
+/// Rewrite styles (empty = correction only). `clean` corrects without rewriting; the others rewrite and need an online LLM.
 pub const STYLES: &[&str] = &[
     "", "clean", "casual", "excited", "formal", "professional", "diplomatic", "soften", "assertive", "humor",
 ];
+
+/// Brief for instruction mode: the selected text is rewritten according to the phrase the user spoke.
+pub const INSTRUCT_PROMPT: &str = "You edit the user's text exactly as they asked. The message contains an Instruction (spoken, so it may have small \
+speech-to-text mistakes) and the Text to change. Apply the instruction to the text. Keep the language of the text unless the instruction asks for \
+another one. Return ONLY the edited text: no explanation, no quotes, no markdown fence.";
 
 pub fn style_prompt(style: &str, lang: &str) -> String {
     let base = match style {
@@ -225,6 +242,8 @@ pub struct AppConfig {
     pub openai_key: Option<String>,
     pub anthropic_key: Option<String>,
     pub hotkey: Key,
+    /// Second key of instruction mode; `None` = disabled.
+    pub instruct_hotkey: Option<Key>,
     pub mode: HotkeyMode,
     pub model_path: PathBuf,
     pub model_url: Option<String>,   // None = auto-discover from HF
@@ -249,6 +268,7 @@ impl AppConfig {
         let path = conf_path();
 
         let mut hotkey_str = "KEY_RIGHTCTRL".to_owned();
+        let mut instruct_str = String::new();
         let mut mode = HotkeyMode::Hold;
         let mut openai_key: Option<String> = None;
         let mut anthropic_key: Option<String> = None;
@@ -284,6 +304,7 @@ impl AppConfig {
                     "OPENAI_API_KEY"          => openai_key = Some(v.trim().to_owned()),
                     "ANTHROPIC_API_KEY"        => anthropic_key = Some(v.trim().to_owned()),
                     "HOTKEY"                   => hotkey_str = v.trim().to_owned(),
+                    "INSTRUCT_HOTKEY"          => instruct_str = v.trim().to_owned(),
                     "MODE"                     => mode = if v.trim() == "toggle" { HotkeyMode::Toggle } else { HotkeyMode::Hold },
                     "OLLAMA_MODEL"             => ollama_model = v.trim().to_owned(),
                     "OPENAI_PROCESSOR_MODEL"   => openai_processor_model = v.trim().to_owned(),
@@ -339,8 +360,14 @@ impl AppConfig {
             }
         }
 
+        let hotkey = parse_key(&hotkey_str)?;
+        let instruct_hotkey = if instruct_str.is_empty() { None } else {
+            let k = parse_key(&instruct_str)?;
+            if k == hotkey { tracing::warn!("INSTRUCT_HOTKEY is the same key as HOTKEY: instruction mode disabled"); None } else { Some(k) }
+        };
+
         Ok(Self {
-            openai_key, anthropic_key, hotkey: parse_key(&hotkey_str)?,
+            openai_key, anthropic_key, hotkey, instruct_hotkey,
             mode, model_path, model_url, model_sha256, model_repo, model_pattern,
             ollama_model, openai_processor_model, anthropic_model,
             processor, output, stt_lang, stt_model, stt_prompt, ui_lang, processor_style,
@@ -401,9 +428,19 @@ mod tests {
         assert!(prompts.iter().all(|p| *p != clean && p.contains("Return ONLY")), "{rewriting:?}");
         prompts.sort();
         prompts.dedup();
-        // "soften" et "diplomatic" partagent volontairement le même prompt.
+        // "soften" and "diplomatic" intentionally share the same prompt.
         assert_eq!(prompts.len(), rewriting.len() - 1);
         assert!(style_prompt("casual", "fr").contains("français"));
+    }
+
+    #[test]
+    fn instruction_key_is_validated_and_must_differ_from_the_main_key() {
+        assert!(conf_warnings("INSTRUCT_HOTKEY=\n").is_empty(), "vide = désactivé");
+        assert!(conf_warnings("INSTRUCT_HOTKEY=KEY_F10\n").is_empty());
+        assert_eq!(conf_warnings("INSTRUCT_HOTKEY=KEY_BANANA").len(), 1);
+        let same = conf_warnings("HOTKEY=KEY_F9\nINSTRUCT_HOTKEY=KEY_F9\n");
+        assert!(same.iter().any(|w| w.contains("must differ")), "{same:?}");
+        assert!(conf_warnings("HOTKEY=KEY_F9\nINSTRUCT_HOTKEY=KEY_F10\n").is_empty());
     }
 
     #[test]

@@ -12,7 +12,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use crate::domain::ports::processor::TextProcessor;
 
-// Budget de génération fixe (Qwen3 réfléchit avant de répondre : le budget couvre la réflexion et la réponse) ; KV cache = prompt + budget au lieu de 4096 fixes (~450 Mo).
+// Fixed generation budget (Qwen3 thinks before answering: the budget covers thinking and answer); KV cache = prompt + budget instead of a fixed 4096 (~450 MB).
 const MAX_NEW: u32 = 1024;
 fn ctx_sizes(n_prompt: usize) -> (u32, u32) {
     (n_prompt as u32 + MAX_NEW, MAX_NEW)
@@ -90,9 +90,9 @@ impl Inner {
     }
 }
 
-/// Gabarit Qwen3 : la réflexion reste activée, car le petit modèle corrige bien mieux ainsi (mesuré : en mode sans réflexion
-/// il rend le plus souvent le texte inchangé). Le bloc `<think>` est retiré de la sortie. Aucun suffixe `/nothink` :
-/// Qwen3 ne le reconnaît pas (le vrai est `/no_think`) et le modèle le recopiait dans le texte corrigé.
+/// Qwen3 template: thinking stays on because the small model corrects far better that way (measured: with thinking off
+/// it mostly returns the text unchanged). The `<think>` block is removed from the output. No `/nothink` suffix:
+/// Qwen3 does not recognize it (the real one is `/no_think`) and the model copied it into the corrected text.
 fn chat_prompt(system: &str, raw: &str) -> String {
     format!("<|im_start|>system\n{system}<|im_end|>\n<|im_start|>user\n{raw}<|im_end|>\n<|im_start|>assistant\n")
 }
@@ -101,7 +101,7 @@ fn chat_prompt(system: &str, raw: &str) -> String {
 impl TextProcessor for LocalProcessor {
     async fn process(&self, raw: &str) -> Result<String> {
         let prompt = chat_prompt(&self.inner.system_prompt, raw);
-        // Hors du thread async : la boucle de dictée reste libre de voir une nouvelle pression de touche.
+        // Off the async thread: the dictation loop stays free to see a new key press.
         let inner = self.inner.clone();
         tokio::task::spawn_blocking(move || inner.generate(&prompt)).await.context("llm task")?
     }

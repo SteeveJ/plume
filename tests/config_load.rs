@@ -1,8 +1,8 @@
-//! Non-régression : chargement réel du fichier de config (HOME isolé dans un dossier temporaire).
+//! Non-regression: real loading of the config file (HOME isolated in a temporary folder).
 use plume::config::{conf_path, set_conf_key, AppConfig, HotkeyMode, OutputMode, ProcessorKind};
 use std::os::unix::fs::PermissionsExt;
 
-// Un seul test : l'environnement du processus est partagé, on évite les accès concurrents.
+// A single test: the process environment is shared, so concurrent access is avoided.
 #[test]
 fn config_defaults_overrides_and_partial_updates() {
     let home = std::env::temp_dir().join(format!("plume-home-{}", std::process::id()));
@@ -11,7 +11,7 @@ fn config_defaults_overrides_and_partial_updates() {
     std::env::set_var("HOME", &home);
     for k in ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "WISPR_OLLAMA_MODEL"] { std::env::remove_var(k); }
 
-    // 1. Premier lancement : le fichier par défaut est créé, privé, et donne les valeurs documentées.
+    // 1. First launch: the default file is created, private, and gives the documented values.
     let cfg = AppConfig::load().unwrap();
     assert_eq!(format!("{:?}", cfg.hotkey), "KEY_RIGHTCTRL");
     assert!(matches!(cfg.mode, HotkeyMode::Hold));
@@ -23,7 +23,7 @@ fn config_defaults_overrides_and_partial_updates() {
     assert!(home.join(".local/share/plume/vocab.txt").exists(), "le vocabulaire par défaut est créé");
     assert!(!cfg.stt_prompt.is_empty(), "le vocabulaire alimente le prompt Whisper");
 
-    // 2. Réglages personnalisés, y compris ceux que la fenêtre de réglages ne montre pas.
+    // 2. Custom settings, including those the settings window does not show.
     std::fs::write(conf_path(), "HOTKEY=KEY_F9\nMODE=toggle\nPROCESSOR=none\nOUTPUT=both\nSTT_LANG=fr\n\
         STT_MODEL=small-q8_0\nPROCESSOR_STYLE=formal\nMODEL_PATH=/x/y.gguf\nOPENAI_API_KEY=sk-file\n").unwrap();
     let cfg = AppConfig::load().unwrap();
@@ -34,19 +34,29 @@ fn config_defaults_overrides_and_partial_updates() {
     assert_eq!(cfg.model_path.to_str(), Some("/x/y.gguf"));
     assert_eq!(cfg.openai_key.as_deref(), Some("sk-file"));
 
-    // 3. La variable d'environnement l'emporte sur le fichier.
+    // 3. The environment variable wins over the file.
     std::env::set_var("OPENAI_API_KEY", "sk-env");
     assert_eq!(AppConfig::load().unwrap().openai_key.as_deref(), Some("sk-env"));
     std::env::remove_var("OPENAI_API_KEY");
 
-    // 4. Régression : changer PROCESSOR (menu du tray) ne doit effacer ni PROCESSOR_STYLE ni MODEL_PATH.
+    // 4. Regression: changing PROCESSOR (tray menu) must erase neither PROCESSOR_STYLE nor MODEL_PATH.
     set_conf_key("PROCESSOR", "openai");
     let cfg = AppConfig::load().unwrap();
     assert!(matches!(cfg.processor, ProcessorKind::OpenAi));
     assert_eq!((cfg.processor_style.as_str(), cfg.model_path.to_str()), ("formal", Some("/x/y.gguf")));
     assert_eq!(std::fs::metadata(conf_path()).unwrap().permissions().mode() & 0o777, 0o600);
 
-    // 5. Un HOTKEY invalide est une erreur claire, pas une valeur par défaut silencieuse.
+    // 4b. Instruction mode: off by default, enabled by a second key, refused if it is the same key.
+    assert!(cfg.instruct_hotkey.is_none());
+    set_conf_key("HOTKEY", "KEY_F9");
+    set_conf_key("INSTRUCT_HOTKEY", "KEY_F10");
+    assert_eq!(format!("{:?}", AppConfig::load().unwrap().instruct_hotkey), "Some(KEY_F10)");
+    set_conf_key("INSTRUCT_HOTKEY", "KEY_F9");
+    assert!(AppConfig::load().unwrap().instruct_hotkey.is_none(), "même touche que HOTKEY : désactivé");
+    set_conf_key("INSTRUCT_HOTKEY", "");
+    assert!(AppConfig::load().unwrap().instruct_hotkey.is_none());
+
+    // 5. An invalid HOTKEY is a clear error, not a silent default.
     set_conf_key("HOTKEY", "KEY_BANANA");
     let err = AppConfig::load().err().expect("hotkey invalide").to_string();
     assert!(err.contains("KEY_BANANA"), "{err}");

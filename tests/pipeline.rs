@@ -1,5 +1,5 @@
-//! Non-régression : chaîne de dictée complète avec les vrais adaptateurs (historique SQLite, bloc-notes, snippets)
-//! et des faux pour le matériel (micro, clavier virtuel) et les modèles.
+//! Non-regression: complete dictation chain with the real adapters (SQLite history, scratchpad, snippets)
+//! and fakes for the hardware (microphone, virtual keyboard) and the models.
 mod common;
 use anyhow::Result;
 use async_trait::async_trait;
@@ -35,7 +35,7 @@ fn text_flows_from_speech_to_processor_snippets_history_and_keyboard() {
         .with_snippets(snippets::parse("mon email => jean@example.com\n"));
     dictate(&mut svc, 1);
 
-    // Le snippet agit après le LLM (sinon le LLM pourrait déformer l'adresse), insensible à la casse.
+    // The snippet acts after the LLM (otherwise the LLM could distort the address), case-insensitive.
     assert_eq!(*typed.0.lock().unwrap(), vec!["jean@example.com est bon.".to_string()]);
     let conn = rusqlite::Connection::open(&db).unwrap();
     let (raw, text): (String, String) = conn.query_row("SELECT raw, text FROM history", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();

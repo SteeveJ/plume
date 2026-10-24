@@ -1,8 +1,8 @@
-//! Non-régression avec de vrais modèles (ignorés par défaut, ils sont gros) :
+//! Non-regression with real models (ignored by default, they are large):
 //!   PLUME_TEST_GGML=/chemin/ggml-tiny.bin PLUME_TEST_GGUF=/chemin/model.gguf [PLUME_TEST_VAD=/chemin/ggml-silero-v5.1.2.bin] \
 //!     cargo test --release --test e2e_models -- --ignored
-//! Ajouter `--features cuda` pour tester le GPU. Ce test attrape ce que la compilation ne voit pas :
-//! whisper.cpp et llama.cpp ont chacun leur ggml, et un conflit de symboles ne plante qu'à l'exécution.
+//! Add `--features cuda` to test the GPU. This test catches what compiling cannot:
+//! whisper.cpp and llama.cpp each have their own ggml, and a symbol clash only crashes at run time.
 mod common;
 use plume::adapters::{processor::LocalProcessor, stt::{new_shared_vocab, WhisperCpp}};
 use plume::domain::model::AudioSamples;
@@ -31,23 +31,23 @@ async fn whisper_and_llama_work_together_in_one_process() {
     assert!(lower.contains("fellow americans") && lower.contains("your country"), "transcription inattendue : {heard:?}");
 
     let silence = AudioSamples::new(vec![0.0; 16_000 * 3], 16_000, 1);
-    // Sur du silence pur, Whisper peut inventer une phrase ("Thank you.") : le service de dictée l'écarte en amont
-    // (contrôle du volume, voir tests/pipeline.rs). L'adaptateur, lui, ne doit jamais laisser passer de balise.
+    // On pure silence Whisper may invent a phrase ("Thank you."): the dictation service drops it upstream
+    // (volume check, see tests/pipeline.rs). The adapter itself must never let a tag through.
     let on_silence = whisper.transcribe(&silence).await.unwrap().text;
     assert!(!on_silence.contains('[') && !on_silence.contains('('), "balise non filtrée : {on_silence:?}");
 
-    // Le LLM tourne après Whisper dans le même processus et ne recopie aucun artefact du prompt.
+    // The LLM runs after Whisper in the same process and copies no artifact of the prompt.
     let cleaned = llm.process(&heard.to_lowercase().replace([',', '.'], "")).await.unwrap();
     assert!(!cleaned.is_empty(), "une sortie vide ferait perdre la dictée");
     assert!(!cleaned.contains("nothink") && !cleaned.contains("<think>"), "{cleaned:?}");
     assert!(cleaned.to_lowercase().contains("your country"), "{cleaned:?}");
 
-    // Et Whisper continue de fonctionner après le LLM.
+    // And Whisper keeps working after the LLM.
     assert_eq!(whisper.transcribe(&jfk()).await.unwrap().text, heard);
 }
 
-/// Reproduit ce que le service de dictée fait avec la vraie sortie de Whisper : volume trop faible = Whisper non appelé,
-/// sinon `is_hallucination`. Si une nouvelle version de Whisper invente une phrase absente de la liste, ce test la montre.
+/// Reproduces what the dictation service does with Whisper's real output: volume too low = Whisper not called,
+/// otherwise `is_hallucination`. If a new Whisper version invents a phrase missing from the list, this test shows it.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn real_whisper_noise_is_filtered_and_real_speech_is_kept() {
@@ -74,7 +74,7 @@ async fn real_whisper_noise_is_filtered_and_real_speech_is_kept() {
                 assert!(heard.text.is_empty() && !heard.speech_confirmed, "langue {lang:?}, {name} : le détecteur de voix aurait dû écarter ce bruit, Whisper a dit {:?}", heard.text);
             }
         }
-        // Avec la langue forcée sur le français, Whisper traduit le discours anglais : on cherche donc le mot dans la bonne langue.
+        // With the language forced to French Whisper translates the English speech: so look for the word in the right language.
         let heard = whisper.transcribe(&speech).await.unwrap();
         let expected = if lang == "fr" { "pays" } else { "your country" };
         assert!(!is_hallucination(&heard.text, speech_rms, heard.speech_confirmed) && heard.text.to_lowercase().contains(expected), "langue {lang:?}, parole : {:?}", heard.text);

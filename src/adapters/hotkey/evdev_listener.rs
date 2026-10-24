@@ -15,9 +15,11 @@ const RESCAN_EVERY: Duration = Duration::from_secs(3);
 pub struct EvdevListener {
     pub key: Key,
     pub mode: HotkeyMode,
+    /// Second key (instruction mode), always hold-to-talk: press = start, release = end.
+    pub instruct_key: Option<Key>,
 }
 
-/// Traduit une valeur evdev (1 = appui, 0 = relâche, 2 = répétition) en évènement d'enregistrement.
+/// Maps an evdev value (1 = press, 0 = release, 2 = key repeat) to a recording event.
 fn to_event(mode: HotkeyMode, value: i32, toggle: &AtomicBool) -> Option<HotkeyEvent> {
     match (mode, value) {
         (HotkeyMode::Hold, 1) => Some(HotkeyEvent::RecordStart),
@@ -31,23 +33,31 @@ fn to_event(mode: HotkeyMode, value: i32, toggle: &AtomicBool) -> Option<HotkeyE
     }
 }
 
+fn instruct_event(value: i32) -> Option<HotkeyEvent> {
+    match value {
+        1 => Some(HotkeyEvent::InstructStart),
+        0 => Some(HotkeyEvent::InstructStop),
+        _ => None,
+    }
+}
+
 impl HotkeyListener for EvdevListener {
-    /// Ne rend jamais la main : les claviers sont ré-énumérés toutes les 3 s, donc un clavier débranché,
-    /// rebranché ou présent seulement après la veille retrouve sa touche sans redémarrer Plume.
+    /// Never returns: keyboards are re-enumerated every 3 s, so an unplugged,
+    /// replugged or post-suspend keyboard gets its key back without restarting Plume.
     fn listen(&self, tx: Sender<HotkeyEvent>) -> Result<()> {
-        let (key, mode) = (self.key, self.mode);
+        let (key, mode, instruct) = (self.key, self.mode, self.instruct_key);
         let toggle = Arc::new(AtomicBool::new(false));
         let active: Arc<Mutex<HashSet<PathBuf>>> = Arc::default();
         let mut warned = false;
 
         loop {
             for (path, mut dev) in evdev::enumerate() {
-                if !dev.supported_keys().is_some_and(|k| k.contains(key)) { continue; }
+                if !dev.supported_keys().is_some_and(|k| k.contains(key) || instruct.is_some_and(|i| k.contains(i))) { continue; }
                 if !active.lock().unwrap().insert(path.clone()) { continue; }
                 warned = false;
                 let (tx, toggle, active) = (tx.clone(), Arc::clone(&toggle), Arc::clone(&active));
                 thread::spawn(move || {
-                    listen_device(&mut dev, key, mode, &toggle, &tx);
+                    listen_device(&mut dev, key, instruct, mode, &toggle, &tx);
                     tracing::warn!("keyboard {} disconnected — watching for it to come back", path.display());
                     active.lock().unwrap().remove(&path);
                 });
@@ -61,12 +71,12 @@ impl HotkeyListener for EvdevListener {
     }
 }
 
-fn listen_device(dev: &mut Device, key: Key, mode: HotkeyMode, toggle: &AtomicBool, tx: &Sender<HotkeyEvent>) {
+fn listen_device(dev: &mut Device, key: Key, instruct: Option<Key>, mode: HotkeyMode, toggle: &AtomicBool, tx: &Sender<HotkeyEvent>) {
     while let Ok(events) = dev.fetch_events() {
         for ev in events {
             if let InputEventKind::Key(k) = ev.kind() {
-                if k != key { continue; }
-                if let Some(m) = to_event(mode, ev.value(), toggle) { let _ = tx.send(m); }
+                let msg = if k == key { to_event(mode, ev.value(), toggle) } else if Some(k) == instruct { instruct_event(ev.value()) } else { None };
+                if let Some(m) = msg { let _ = tx.send(m); }
             }
         }
     }
@@ -81,8 +91,18 @@ mod tests {
         values.iter().map(|&v| match to_event(mode, v, &toggle) {
             Some(HotkeyEvent::RecordStart) => 'S',
             Some(HotkeyEvent::RecordStop) => 'E',
-            None => '.',
+            _ => '.',
         }).collect()
+    }
+
+    #[test]
+    fn instruct_key_is_always_hold_and_ignores_key_repeat() {
+        let kinds: String = [1, 2, 2, 0, 5].iter().map(|&v| match instruct_event(v) {
+            Some(HotkeyEvent::InstructStart) => 'S',
+            Some(HotkeyEvent::InstructStop) => 'E',
+            _ => '.',
+        }).collect();
+        assert_eq!(kinds, "S..E.");
     }
 
     #[test]

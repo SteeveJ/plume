@@ -1,5 +1,5 @@
-/// Explication courte et action à faire pour les échecs de démarrage les plus courants
-/// (Plume est lancé sans terminal : sans notification, l'utilisateur ne voit rien).
+/// Short explanation and action for the most common startup failures
+/// (Plume starts without a terminal: without a notification the user sees nothing).
 pub fn startup_hint(error: &str) -> Option<&'static str> {
     let e = error.to_lowercase();
     if e.contains("uinput") {

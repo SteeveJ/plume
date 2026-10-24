@@ -5,7 +5,7 @@ pub struct Snippet {
     expansion: String,
 }
 
-/// Format : une règle par ligne `phrase => texte` ; `#` commente ; `\n` dans le texte = saut de ligne.
+/// Format: one rule per line `phrase => text`; `#` starts a comment; `\n` in the text = line break.
 pub fn parse(src: &str) -> Vec<Snippet> {
     let mut v: Vec<Snippet> = src.lines()
         .filter(|l| !l.trim_start().starts_with('#'))
@@ -23,7 +23,7 @@ pub fn load() -> Vec<Snippet> {
     std::fs::read_to_string(data_dir().join("snippets.txt")).map(|s| parse(&s)).unwrap_or_default()
 }
 
-// shortcut: règles appliquées l'une après l'autre (une expansion peut en redéclencher une autre) ; to_lowercase qui change la longueur => texte inchangé.
+// shortcut: rules are applied one after the other (an expansion can retrigger another); if to_lowercase changes the length the text is left unchanged.
 pub fn expand(text: &str, snippets: &[Snippet]) -> String {
     let mut out = text.to_string();
     for s in snippets {

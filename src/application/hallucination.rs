@@ -1,9 +1,9 @@
-/// En dessous de ce volume (RMS), l'audio est du bruit ou une voix à peine audible : les phrases que Whisper invente
-/// sur du bruit (« Thank you. », les crédits de sous-titres) sont écartées. Une vraie voix au micro est bien au-dessus.
+/// Below this volume (RMS) the audio is noise or a barely audible voice: the phrases Whisper invents
+/// on noise ("Thank you.", subtitle credits) are dropped. A real voice at the microphone is well above it.
 pub const QUIET_RMS: f32 = 0.03;
 
-/// Phrases que Whisper `turbo` invente sur du bruit, mesurées sur du bruit blanc, un bourdonnement de 50 Hz et des claquements
-/// de touches (anglais, français, langue automatique), plus les classiques connus de ses données d'entraînement.
+/// Phrases Whisper `turbo` invents on noise, measured on white noise, a 50 Hz hum and key clicks
+/// (English, French, automatic language), plus the known classics from its training data.
 const INVENTED: &[&str] = &[
     "thank you", "thanks", "thank you for watching", "thanks for watching", "you", "bye", "bye bye",
     "merci", "merci à tous", "merci d avoir regardé cette vidéo", "au revoir", "à bientôt",
@@ -16,14 +16,14 @@ pub fn rms(samples: &[f32]) -> f32 {
 }
 
 fn normalize(text: &str) -> String {
-    // `to_lowercase` (pas `to_ascii_lowercase`) : « Merci À Tous » doit devenir « merci à tous ».
+    // `to_lowercase` (not `to_ascii_lowercase`): "Merci À Tous" must become "merci à tous".
     let spaced: String = text.chars().map(|c| if c.is_alphanumeric() { c.to_lowercase().collect::<String>() } else { " ".into() }).collect();
     spaced.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Vrai si `text` n'est pas de la parole : de la ponctuation seule (« . », « ... ») quel que soit le volume,
-/// ou une phrase inventée sur un audio faible. Une phrase légitime au même texte, dite à voix normale, passe,
-/// et aussi à voix basse quand un détecteur de voix a confirmé de la parole (`speech_confirmed`, ADR 0014).
+/// True if `text` is not speech: punctuation alone (".", "...") whatever the volume,
+/// or an invented phrase on weak audio. The same legitimate text said at normal volume passes,
+/// and so does a quiet one when a voice detector confirmed speech (`speech_confirmed`, ADR 0014).
 pub fn is_hallucination(text: &str, rms: f32, speech_confirmed: bool) -> bool {
     let norm = normalize(text);
     if !text.chars().any(|c| c.is_alphanumeric()) { return true; }

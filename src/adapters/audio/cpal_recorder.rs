@@ -14,7 +14,7 @@ pub struct CpalRecorder {
 }
 
 impl CpalRecorder {
-    /// Ne échoue pas sans micro : le périphérique est relu à chaque `start()` (casque branché plus tard, micro par défaut changé).
+    /// Does not fail without a microphone: the device is re-read at every `start()` (headset plugged in later, default input changed).
     pub fn new() -> Result<Self> {
         let cfg = cpal::default_host().default_input_device().and_then(|d| d.default_input_config().ok());
         Ok(Self {
@@ -27,12 +27,12 @@ impl CpalRecorder {
     }
 }
 
-/// Plafond d'enregistrement : 10 minutes (touche bloquée, toggle oublié). À 48 kHz stéréo, 10 min ≈ 230 Mo ; sans plafond, ≈ 1,4 Go par heure jusqu'à l'OOM.
+/// Recording cap: 10 minutes (stuck key, forgotten toggle). At 48 kHz stereo 10 min is about 230 MB; without a cap it grows about 1.4 GB per hour until out-of-memory.
 fn max_samples(sample_rate: u32, channels: u16) -> usize {
     sample_rate as usize * channels as usize * 600
 }
 
-/// Ajoute `data` seulement s'il reste de la place ; renvoie `false` quand le plafond est atteint.
+/// Appends `data` only if there is room; returns `false` once the cap is reached.
 fn append_capped(buf: &mut Vec<f32>, data: &[f32], max: usize) -> bool {
     if buf.len() + data.len() > max { return false; }
     buf.extend_from_slice(data);

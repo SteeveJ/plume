@@ -1,8 +1,8 @@
-# Vocabulaire par défaut pour Whisper (initial_prompt).
-# Éditez ~/.local/share/plume/vocab.txt pour personnaliser.
-# Les lignes commençant par # sont des commentaires et ignorées.
+# Default vocabulary for Whisper (initial_prompt).
+# Edit ~/.local/share/plume/vocab.txt to customize.
+# Lines starting with # are comments and are ignored.
 
-# Prénoms français souvent mal reconnus
+# French first names often misrecognized
 Yves, Yvette, Yvon, Gilles, Gil, Ghislain, Ghislaine,
 Quentin, Corentin, Audrey, Valéry, Valérie, Séverine, Cécile,
 Gwenaëlle, Gaëlle, Gaël, Loïc, François, Françoise,
@@ -11,22 +11,22 @@ Frédéric, Frédérique, Véronique, Dominique, Sébastien, Bastien,
 Guillaume, Bertrand, Renaud, Christophe, Laurent, Laurence,
 Nathalie, Isabelle, Virginie, Théodore, Théo, Maxime, Clément,
 
-# Noms de famille courants
+# Common family names
 Dupont, Durand, Martin, Bernard, Leroy, Moreau, Simon, Laurent,
 Lefebvre, Roux, Fournier, Morel, Girard, André, Mercier,
 
-# Outils professionnels
+# Professional tools
 LinkedIn, Slack, Teams, Zoom, Google Meet, Webex,
 JIRA, Confluence, Notion, Trello, Asana,
 Salesforce, HubSpot, SharePoint, OneDrive, Google Drive,
 
-# Termes business
+# Business terms
 devis, facture, TVA, URSSAF, KBIS, SIRET, SIREN,
 DSI, DRH, DAF, RSE, KPI, ROI, OKR, SLA, NDA,
 freelance, portage salarial, auto-entrepreneur,
 compte-rendu, ordre du jour, point d'étape,
 
-# Développement logiciel
+# Software development
 GitHub, GitLab, Bitbucket, Docker, Kubernetes, Helm, Terraform, Ansible,
 Jenkins, GitHub Actions, AWS, Azure, GCP, OVH, Scaleway,
 API, REST, GraphQL, gRPC, WebSocket, OAuth, JWT,
@@ -37,22 +37,22 @@ PostgreSQL, MySQL, SQLite, Redis, MongoDB, Elasticsearch, Kafka,
 Python, Rust, Golang, TypeScript, JavaScript, Kotlin,
 npm, pip, Cargo, Maven, Gradle,
 
-# Intelligence artificielle
+# Artificial intelligence
 ChatGPT, Claude, Anthropic, OpenAI, Mistral, Llama, Gemini,
 LLM, RAG, fine-tuning, embeddings, tokenizer, prompt,
 Hugging Face, Ollama, LangChain,
 
-# Termes médicaux courants
+# Common medical terms
 ordonnance, échographie, IRM, scanner, bilan sanguin,
 cardiologue, dermatologue, kinésithérapeute, orthopédiste,
 Sécurité Sociale, mutuelle, feuille de soins,
 
-# Marqueurs grammaticaux souvent mal segmentés
+# Grammatical markers often badly segmented
 parce que, c'est-à-dire, vis-à-vis, peut-être,
 au-delà, ci-dessous, ci-dessus, bien que, afin que,
 
-# Argot et expressions familières françaises
-# (souvent mal transcrits car non-standard)
+# French slang and colloquial expressions
+# (often mistranscribed because non-standard)
 vachement, carrément, franchement, clairement, grave,
 trop bien, trop cool, trop nul, c'est ouf, c'est dingue, c'est chelou,
 chelou, zarbi, relou, ouf, cheum, kiffer, kifer, kiffe, kiffe,
@@ -78,8 +78,8 @@ un truc, un machin, un bidule, un truc de ouf,
 en vrai, à donf, à fond, à fond les ballons,
 tellement, trop, grave, énormément, vachement,
 
-# Insultes et jurons français
-# (Whisper les censure souvent ou les remplace par des mots proches)
+# French insults and swear words
+# (Whisper often censors them or replaces them with similar words)
 merde, putain, bordel, putain de merde, bordel de merde,
 con, connard, connasse, abruti, abrutie, imbécile, idiot,
 salaud, salope, enfoiré, enfoirée, fumier, ordure,

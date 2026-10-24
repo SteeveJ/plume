@@ -1,22 +1,22 @@
-//! Compréhension du français avec de vrais modèles (ignoré par défaut) :
+//! Understanding of French with real models (ignored by default):
 //!   PLUME_TEST_GGML=/chemin/ggml-turbo.bin PLUME_TEST_GGUF=/chemin/model.gguf \
 //!     cargo test --release --test e2e_french -- --ignored        (+ --features cuda)
-//! Les phrases viennent de tests/fixtures/fr/ (voix de synthèse française, 16 kHz) ; voir docs/fr/tests.md.
+//! The sentences come from tests/fixtures/fr/ (French synthetic voice, 16 kHz); see docs/en/development.md.
 mod common;
 use common::*;
 use plume::adapters::{processor::LocalProcessor, stt::{new_shared_vocab, WhisperCpp}};
 use plume::domain::ports::{processor::TextProcessor, stt::SpeechToText};
 use std::path::PathBuf;
 
-/// llama.cpp ne s'initialise qu'une fois par processus : les tests qui chargent le LLM passent l'un après l'autre.
+/// llama.cpp initializes only once per process: tests that load the LLM run one after the other.
 static ONE_AT_A_TIME: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 fn env_path(var: &str) -> PathBuf {
     PathBuf::from(std::env::var(var).unwrap_or_else(|_| panic!("définir {var}")))
 }
 
-/// Mots-clés qui portent le sens de chaque phrase (alternatives séparées par `|`) : « 15 » ou « quinze »,
-/// car l'important est que le message soit compris, pas la façon d'écrire un nombre.
+/// Keywords that carry each sentence's meaning (alternatives separated by `|`): "15" or "quinze",
+/// because what matters is that the message is understood, not how a number is written.
 const MEANING: &[(&str, &[&str])] = &[
     ("mail", &["marie", "rapport", "jeudi", "soir"]),
     ("accents", &["plage|page", "hier", "ramène", "enfants", "nuit"]),
@@ -36,14 +36,14 @@ async fn whisper_understands_french_speech_forced_and_auto_detected() {
         for (name, reference) in FRENCH_SENTENCES {
             let said = whisper.transcribe(&french_audio(name)).await.unwrap().text;
             let lower = said.to_lowercase();
-            // 1. Le sens est là, quel que soit le format des nombres.
+            // 1. The meaning is there, whatever the number format.
             let anchors = MEANING.iter().find(|(n, _)| n == name).unwrap().1;
             for group in anchors {
                 assert!(group.split('|').any(|alt| lower.contains(alt)), "langue {lang:?}, {name} : {group:?} absent de {said:?}");
             }
-            // 2. Le texte reste en français (pas de traduction en anglais en détection automatique).
+            // 2. The text stays in French (no translation to English with automatic detection).
             assert!(!lower.contains(" the ") && !lower.contains(" and "), "langue {lang:?}, {name} traduit ? {said:?}");
-            // 3. Aucune phrase n'est franchement ratée.
+            // 3. No sentence is badly missed.
             let e = wer(reference, &said);
             assert!(e <= 0.30, "langue {lang:?}, {name} : {:.0} % d'erreurs\n  attendu {reference:?}\n  obtenu  {said:?}", e * 100.0);
             errors += e * words(reference).len() as f32;
@@ -54,8 +54,8 @@ async fn whisper_understands_french_speech_forced_and_auto_detected() {
     }
 }
 
-/// La limite qui existait avant le détecteur de voix : un « Merci. » très bas ressemble à l'hallucination « Merci. » de Whisper
-/// sur du bruit. Avec le détecteur (`PLUME_TEST_VAD`), la parole est confirmée et le mot est conservé ; le bruit, lui, ne l'est pas.
+/// The limit that existed before the voice detector: a very quiet "Merci." looks like the "Merci." Whisper hallucinates
+/// on noise. With the detector (`PLUME_TEST_VAD`) speech is confirmed and the word is kept; noise is not.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn a_very_quiet_merci_is_kept_thanks_to_the_voice_detector() {
@@ -82,11 +82,11 @@ async fn llm_fixes_the_form_of_french_dictations_without_changing_the_words() {
     let llm = LocalProcessor::load(&env_path("PLUME_TEST_GGUF"), plume::config::style_prompt("clean", "fr")).unwrap();
     let (mut well_formed, mut accents_restored) = (0, 0);
     for (name, reference) in FRENCH_SENTENCES {
-        // Texte brut tel qu'un STT approximatif le rendrait : minuscules, sans ponctuation, sans accents ni apostrophes.
+        // Raw text as an approximate STT would render it: lowercase, no punctuation, no accents or apostrophes.
         let degraded = plain_words(reference).join(" ");
         let out = llm.process(&degraded).await.unwrap();
 
-        // Le LLM ne change que la forme : mêmes mots (accents mis à part), rien de perdu, rien d'ajouté.
+        // The LLM only changes the form: same words (accents aside), nothing lost, nothing added.
         assert_eq!(plain_words(&out), plain_words(&degraded), "{name} : le sens a changé\n  entrée {degraded:?}\n  sortie {out:?}");
         assert!(!out.contains("nothink") && !out.contains("<think>"), "{name} : {out:?}");
 
@@ -95,7 +95,7 @@ async fn llm_fixes_the_form_of_french_dictations_without_changing_the_words() {
         well_formed += usize::from(starts_upper && ends_punct);
         accents_restored += ["été", "à", "baissé", "déployer", "dernier"].iter().filter(|a| out.contains(*a) && !degraded.contains(*a)).count();
     }
-    // Un modèle de 0,6 milliard de paramètres corrige environ 4 phrases sur 6 : on exige la moitié, pas la perfection.
+    // A 0.6-billion-parameter model corrects about 4 sentences out of 6: we require half, not perfection.
     assert!(well_formed >= 3, "seulement {well_formed}/6 phrases avec majuscule et ponctuation finale");
     assert!(accents_restored >= 2, "seulement {accents_restored} accents restaurés");
 }
@@ -110,8 +110,8 @@ async fn french_speech_through_whisper_then_llm_keeps_its_meaning() {
     for (name, reference) in FRENCH_SENTENCES {
         let heard = whisper.transcribe(&french_audio(name)).await.unwrap().text;
         let mut cleaned = llm.process(&heard).await.unwrap();
-        // Comme le service de dictée : une sortie vide (réflexion du petit modèle qui tourne en boucle sur un texte long,
-        // sans jamais répondre) garde le texte de Whisper. Rien n'est perdu, mais la correction n'a pas eu lieu.
+        // Like the dictation service: an empty output (the small model's thinking looping on a long text,
+        // never answering) keeps Whisper's text. Nothing is lost, but the correction did not happen.
         if cleaned.trim().is_empty() {
             fell_back.push(*name);
             cleaned = heard.clone();

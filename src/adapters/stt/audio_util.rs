@@ -5,7 +5,7 @@ use crate::domain::model::AudioSamples;
 
 pub const RATE: u32 = 16_000;
 
-// shortcut: box-filter resampling (pas de vrai low-pass), suffisant pour de la voix; upgrade si artefacts audibles.
+// shortcut: box-filter resampling (no real low-pass), good enough for voice; upgrade if artifacts become audible.
 pub fn to_mono_16k(audio: &AudioSamples) -> Vec<f32> {
     let step = audio.channels.max(1) as usize;
     let mono: Vec<f32> = audio.samples.chunks(step)
@@ -23,7 +23,7 @@ pub fn to_mono_16k(audio: &AudioSamples) -> Vec<f32> {
     }).collect()
 }
 
-/// WAV mono 16-bit 16 kHz : ce que Whisper utilise en interne, 3x plus petit qu'à 48 kHz.
+/// Mono 16-bit 16 kHz WAV: what Whisper uses internally, 3x smaller than at 48 kHz.
 pub fn encode_wav_16k(audio: &AudioSamples) -> Result<Vec<u8>> {
     let spec = WavSpec { channels: 1, sample_rate: RATE, bits_per_sample: 16, sample_format: SampleFormat::Int };
     let mut buf = Cursor::new(Vec::new());

@@ -395,8 +395,8 @@ fn get_whisper_cpp_version(whisper_root: &std::path::Path) -> std::io::Result<Op
     Ok(None)
 }
 
-// Renomme tous les symboles définis (sauf l'API publique `whisper_*`) des archives whisper/ggml avec un préfixe,
-// pour que ce ggml coexiste dans le même binaire avec celui de llama.cpp (symboles dupliqués sinon).
+// Renames every defined symbol (except the public `whisper_*` API) of the whisper/ggml archives with a prefix,
+// so that this ggml coexists in the same binary with llama.cpp's (duplicate symbols otherwise).
 fn prefix_ggml_symbols(roots: &[PathBuf]) {
     use std::collections::BTreeSet;
     use std::process::Command;
@@ -421,13 +421,13 @@ fn prefix_ggml_symbols(roots: &[PathBuf]) {
     let mut syms = BTreeSet::new();
     for l in &libs {
         let out = Command::new("nm").args(["--defined-only", "--format=posix"]).arg(l)
-            .output().expect("`nm` (binutils) requis pour préfixer les symboles ggml");
+            .output().expect("`nm` (binutils) is required to prefix the ggml symbols");
         for line in String::from_utf8_lossy(&out.stdout).lines() {
             if line.ends_with(':') { continue; }
             let mut it = line.split_whitespace();
             let (Some(name), Some(ty)) = (it.next(), it.next()) else { continue };
             if name.starts_with('.') || name.starts_with("whisper_") || name.starts_with(PREFIX) || is_std_symbol(name) { continue; }
-            // inclut les symboles locaux : les signatures de groupes COMDAT (ex. `..C5Ev`) doivent aussi changer, sinon l'éditeur de liens jette le groupe de llama.
+            // includes local symbols: COMDAT group signatures (e.g. `..C5Ev`) must change too, otherwise the linker discards llama's group.
             if matches!(ty, "T" | "t" | "D" | "d" | "B" | "b" | "R" | "r" | "W" | "V" | "S" | "s" | "G" | "g" | "i" | "u" | "n") {
                 syms.insert(name.to_string());
             }
@@ -440,12 +440,12 @@ fn prefix_ggml_symbols(roots: &[PathBuf]) {
     std::fs::write(&map_path, map).unwrap();
     for l in &libs {
         let st = Command::new("objcopy").arg(format!("--redefine-syms={}", map_path.display())).arg(l)
-            .status().expect("`objcopy` (binutils) requis pour préfixer les symboles ggml");
-        assert!(st.success(), "objcopy a échoué sur {}", l.display());
+            .status().expect("`objcopy` (binutils) is required to prefix the ggml symbols");
+        assert!(st.success(), "objcopy failed on {}", l.display());
     }
 }
 
-// Les instanciations de la lib standard (std::, __gnu_cxx::) doivent rester partagées : l'autre ggml (llama) en dépend.
+// Standard library instantiations (std::, __gnu_cxx::) must stay shared: the other ggml (llama) depends on them.
 fn is_std_symbol(name: &str) -> bool {
     let Some(rest) = name.strip_prefix("_Z") else { return false };
     ["GVZNK", "GVZN", "ZNK", "ZN", "NK", "N", "TI", "TS", "TV", "T", ""]

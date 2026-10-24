@@ -1,5 +1,5 @@
-//! Le français de bout en bout, sans modèle : accents, majuscules, snippets, historique, notifications en français.
-//! La compréhension réelle de la parole française (Whisper + LLM) est dans tests/e2e_french.rs.
+//! French end to end, without a model: accents, capitals, snippets, history, notifications in French.
+//! Real understanding of spoken French (Whisper + LLM) is in tests/e2e_french.rs.
 mod common;
 use common::*;
 use plume::adapters::{history::SqliteHistory, scratchpad::FileScratchpad};
@@ -12,7 +12,7 @@ fn text_metrics_behave() {
     assert!((wer("le chat dort ici", "le chien dort ici") - 0.25).abs() < 1e-6);
     assert_eq!(words("Il est à 10 % du but, c'est-à-dire proche."), ["il", "est", "à", "10%", "du", "but", "c", "est", "à", "dire", "proche"]);
     assert_eq!(plain_words("J'ai été à côté"), ["j", "ai", "ete", "a", "cote"]);
-    // « J'étais » au lieu de « J'ai été » = 2 erreurs sur 17 mots.
+    // "J'étais" instead of "J'ai été" = 2 errors out of 17 words.
     let e = wer(FRENCH_SENTENCES[1].1, "J'étais à la plage hier, et il a fallu que je ramène les enfants avant la nuit.");
     assert!(e > 0.1 && e < 0.2, "{e}");
 }
@@ -70,7 +70,7 @@ fn french_notifications_for_the_user_who_chose_french() {
 fn a_long_french_dictation_is_corrected_in_chunks_without_losing_a_word() {
     use async_trait::async_trait;
     use plume::domain::ports::processor::TextProcessor;
-    // Faux correcteur qui met une majuscule : vérifie que le découpage en morceaux recolle tout le texte.
+    // Fake corrector that upper-cases: checks that the chunking glues the whole text back together.
     struct Upper;
     #[async_trait]
     impl TextProcessor for Upper {

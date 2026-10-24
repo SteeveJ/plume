@@ -1,7 +1,7 @@
 use reqwest::Client;
 use std::time::Duration;
 
-/// Client HTTP avec délais : sans eux, un réseau figé bloque la dictée indéfiniment.
+/// HTTP client with timeouts: without them a stalled network would block dictation forever.
 pub fn client(timeout: Duration) -> Client {
     Client::builder()
         .connect_timeout(Duration::from_secs(10))
