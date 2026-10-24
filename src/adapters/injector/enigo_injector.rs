@@ -33,7 +33,6 @@ fn make_keyboard() -> Result<evdev::uinput::VirtualDevice> {
 impl TextInjector for EnigoInjector {
     fn inject(&self, text: &str) -> Result<()> {
         let mut cb = Clipboard::new()?;
-        let prev = cb.get_text().ok();
         cb.set_text(text.to_owned())?;
 
         // Brief pause so the compositor registers the new clipboard content.
@@ -48,8 +47,6 @@ impl TextInjector for EnigoInjector {
             InputEvent::new(EventType::SYNCHRONIZATION, 0, 0),
         ])?;
 
-        std::thread::sleep(Duration::from_millis(20));
-        if let Some(t) = prev { let _ = cb.set_text(t); }
         Ok(())
     }
 }

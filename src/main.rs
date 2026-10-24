@@ -97,11 +97,12 @@ fn install_autostart() -> Result<()> {
     let icon_rec_path = icon_dir.join(format!("{APP_NAME}-recording.png"));
     std::fs::write(&icon_rec_path, include_bytes!("../assets/plume-recording.png"))?;
     println!("Installed: {}", icon_rec_path.display());
-    // Refresh icon theme cache so tray finds the icon by name immediately.
+    // Refresh icon theme cache — skip gracefully if tool is absent (minimal installs).
     let icon_base = PathBuf::from(&home).join(".local/share/icons/hicolor");
-    let _ = std::process::Command::new("gtk-update-icon-cache")
-        .args(["-f", "-t", icon_base.to_str().unwrap_or("")]).spawn();
-    // Touch the directory so GNOME session reloads the theme without logout.
+    if std::process::Command::new("which").arg("gtk-update-icon-cache").output().map(|o| o.status.success()).unwrap_or(false) {
+        let _ = std::process::Command::new("gtk-update-icon-cache")
+            .args(["-f", "-t", icon_base.to_str().unwrap_or("")]).spawn();
+    }
     let _ = std::process::Command::new("touch").arg(&icon_base).spawn();
 
     // .desktop entry
@@ -146,14 +147,8 @@ fn install_autostart() -> Result<()> {
     Ok(())
 }
 
-async fn ollama_available(model: &str) -> bool {
-    reqwest::Client::new()
-        .post("http://localhost:11434/api/chat")
-        .json(&serde_json::json!({
-            "model": model, "stream": false,
-            "messages": [{"role": "user", "content": "ping"}]
-        }))
-        .send().await
+async fn ollama_available(_model: &str) -> bool {
+    reqwest::get("http://localhost:11434/api/version").await
         .map(|r| r.status().is_success())
         .unwrap_or(false)
 }

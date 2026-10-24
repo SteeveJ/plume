@@ -1,3 +1,6 @@
-[env]
-CUDA_PATH = "/opt/cuda"
-PATH = "/opt/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/bin:/usr/sbin"
+# Set CUDA_PATH before building if nvcc is not in PATH.
+# Common locations:
+#   Arch/CachyOS:  CUDA_PATH=/opt/cuda
+#   Ubuntu/Debian: CUDA_PATH=/usr/local/cuda
+#   Fedora:        CUDA_PATH=/usr/local/cuda
+# Example: CUDA_PATH=/opt/cuda cargo build --release --features cuda

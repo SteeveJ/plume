@@ -19,9 +19,8 @@ pub fn extract_words(text: &str, existing: &str) -> Vec<String> {
             .filter(|c| c.is_alphabetic() || *c == '-' || *c == '\'')
             .collect();
         if clean.len() < 3 {
-            // Track sentence boundaries
             if word.ends_with(['.', '!', '?']) { prev_is_boundary = true; }
-            else { prev_is_boundary = false; }
+            else if clean.len() > 1 { prev_is_boundary = false; } // single letters (I, a) don't reset boundary
             continue;
         }
 
@@ -40,6 +39,37 @@ pub fn extract_words(text: &str, existing: &str) -> Vec<String> {
         prev_is_boundary = word.ends_with(['.', '!', '?']);
     }
     new_words
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn single_letter_word_does_not_reset_boundary() {
+        // "I" is a single letter → prev_is_boundary stays true → "Love" is NOT captured
+        let words = extract_words("I Love Paris", "");
+        assert!(!words.contains(&"Love".to_string()), "'Love' after 'I' must not be captured");
+        assert!(words.contains(&"Paris".to_string()), "'Paris' is a mid-sentence proper noun");
+    }
+
+    #[test]
+    fn sentence_start_capital_not_captured() {
+        let words = extract_words("Hello world today", "");
+        assert!(words.is_empty(), "first word of sentence must not be captured");
+    }
+
+    #[test]
+    fn acronym_always_captured() {
+        let words = extract_words("we use GPU acceleration", "");
+        assert!(words.contains(&"GPU".to_string()));
+    }
+
+    #[test]
+    fn existing_word_not_duplicated() {
+        let words = extract_words("I love Paris", "Paris");
+        assert!(!words.contains(&"Paris".to_string()), "already in vocab");
+    }
 }
 
 /// Append newly learned words to vocab.txt and return the updated full prompt.

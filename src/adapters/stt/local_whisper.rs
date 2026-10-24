@@ -5,7 +5,6 @@ use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::Mutex;
 use std::io::Cursor;
-use tempfile::TempDir;
 use crate::domain::model::{AudioSamples, Transcription};
 use crate::domain::ports::stt::SpeechToText;
 use super::shared_vocab::SharedVocab;
@@ -53,7 +52,6 @@ impl LocalWhisper {
 
         // Server script embedded at compile time, written to data dir on first use.
         let python_candidates = [
-            "/home/skyro/WanGP/.venv/bin/python",
             "python3",
             "python",
         ];
@@ -67,7 +65,9 @@ impl LocalWhisper {
                     .unwrap_or(false);
                 if ok {
                     let script = server_script_path();
-                    return Some(Self::new(python, script, model, "cuda", lang, prompt.clone()));
+                    let device = if Command::new("nvidia-smi").output()
+                        .map(|o| o.status.success()).unwrap_or(false) { "cuda" } else { "cpu" };
+                    return Some(Self::new(python, script, model, device, lang, prompt.clone()));
                 }
             }
         }
@@ -153,7 +153,13 @@ impl SpeechToText for LocalWhisper {
     async fn transcribe(&self, audio: &AudioSamples) -> Result<Transcription> {
         self.ensure_server()?;
 
-        let dir = TempDir::new().context("tmpdir")?;
+        // Use ramdisk when available — avoids disk I/O for the temp WAV (typically 300-600 KB).
+        let tmp_base = if std::path::Path::new("/dev/shm").exists() {
+            std::path::PathBuf::from("/dev/shm")
+        } else {
+            std::env::temp_dir()
+        };
+        let dir = tempfile::Builder::new().tempdir_in(&tmp_base).context("tmpdir")?;
         let wav_path = dir.path().join("audio.wav");
         let wav = self.encode_wav(audio)?;
         std::fs::write(&wav_path, &wav).context("write wav")?;

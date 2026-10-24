@@ -135,18 +135,22 @@ where
             Err(e) => { tracing::error!("STT error: {e}"); self.notifier.notify(t("✗ STT error", "✗ Erreur STT", self.ui_lang)); return; }
         };
 
-        // Learn new proper nouns / acronyms from this transcription.
-        if let Some(vocab) = &self.vocab {
+        // Vocab learning and LLM processing are independent — run them in parallel.
+        let vocab_task = self.vocab.as_ref().map(|vocab| {
             use crate::adapters::stt::shared_vocab::{extract_words, persist_words};
+            let vocab = vocab.clone();
+            let raw_for_vocab = raw.clone();
             let existing = vocab.lock().unwrap().clone();
-            let new_words = extract_words(&raw, &existing);
-            if !new_words.is_empty() {
-                if let Some(updated) = persist_words(&new_words) {
-                    *vocab.lock().unwrap() = updated;
+            tokio::task::spawn_blocking(move || {
+                let new_words = extract_words(&raw_for_vocab, &existing);
+                if !new_words.is_empty() {
                     tracing::debug!("vocab learned: {:?}", new_words);
+                    if let Some(updated) = persist_words(&new_words) {
+                        *vocab.lock().unwrap() = updated;
+                    }
                 }
-            }
-        }
+            })
+        });
 
         let text = match &self.processor {
             Some(p) => match p.process(&raw).await {
@@ -168,6 +172,9 @@ where
             OutputMode::Scratchpad => self.do_scratchpad(&text),
             OutputMode::Both => { self.do_scratchpad(&text); self.do_inject(&text); }
         }
+
+        // Await vocab task before returning — ensures vocab is current for the next dictation.
+        if let Some(task) = vocab_task { let _ = task.await; }
 
         self.notifier.notify(t("✓ Done", "✓ Fait", self.ui_lang));
     }

@@ -31,6 +31,7 @@ impl LocalProcessor {
         let _guard = self._lock.lock().unwrap();
         let ctx_params = LlamaContextParams::default()
             .with_n_ctx(NonZeroU32::new(4096));
+        // shortcut: context recreated per call (~100ms); LlamaContext<'model> borrows self prevents caching
         let mut ctx = self.model.new_context(&self.backend, ctx_params)
             .context("new context")?;
 
