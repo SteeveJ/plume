@@ -1,4 +1,4 @@
-use crate::config::{AppConfig, APP_NAME, HotkeyMode, OutputMode, ProcessorKind, UiLang};
+use crate::config::{AppConfig, HotkeyMode, OutputMode, ProcessorKind, UiLang};
 
 fn tl(en: &'static str, fr: &'static str, lang: UiLang) -> &'static str {
     match lang { UiLang::Fr => fr, _ => en }
@@ -237,41 +237,31 @@ pub fn run_settings_window(cfg: AppConfig) {
 
         let win_clone = win.clone();
         save_btn.connect_clicked(move |_| {
-            let mut lines: Vec<String> = Vec::new();
+            let mut pairs: Vec<(&str, String)> = Vec::new();
 
-            if let Some(v) = hotkey_cb.active_id()     { lines.push(format!("HOTKEY={v}")); }
-            if let Some(v) = mode_cb.active_id()       { lines.push(format!("MODE={v}")); }
-            if let Some(v) = out_cb.active_id()        { lines.push(format!("OUTPUT={v}")); }
-            if let Some(v) = stt_cb.active_id()        { lines.push(format!("STT_LANG={v}")); }
-            if let Some(v) = stt_model_cb.active_id()  { lines.push(format!("STT_MODEL={v}")); }
-            let sp = stt_prompt_e.text();
-            lines.push(format!("STT_PROMPT={sp}"));
-            if let Some(v) = proc_cb.active_id()       { lines.push(format!("PROCESSOR={v}")); }
-            if let Some(v) = style_cb.active_id()      { lines.push(format!("PROCESSOR_STYLE={v}")); }
-            if let Some(v) = lang_cb.active_id()       { lines.push(format!("APP_LANG={v}")); }
+            if let Some(v) = hotkey_cb.active_id()     { pairs.push(("HOTKEY", v.to_string())); }
+            if let Some(v) = mode_cb.active_id()       { pairs.push(("MODE", v.to_string())); }
+            if let Some(v) = out_cb.active_id()        { pairs.push(("OUTPUT", v.to_string())); }
+            if let Some(v) = stt_cb.active_id()        { pairs.push(("STT_LANG", v.to_string())); }
+            if let Some(v) = stt_model_cb.active_id()  { pairs.push(("STT_MODEL", v.to_string())); }
+            pairs.push(("STT_PROMPT", stt_prompt_e.text().to_string()));
+            if let Some(v) = proc_cb.active_id()       { pairs.push(("PROCESSOR", v.to_string())); }
+            if let Some(v) = style_cb.active_id()      { pairs.push(("PROCESSOR_STYLE", v.to_string())); }
+            if let Some(v) = lang_cb.active_id()       { pairs.push(("APP_LANG", v.to_string())); }
 
             let ok = openai_e.text();
-            if !ok.is_empty() { lines.push(format!("OPENAI_API_KEY={ok}")); }
+            if !ok.is_empty() { pairs.push(("OPENAI_API_KEY", ok.to_string())); }
             let ak = anthropic_e.text();
-            if !ak.is_empty() { lines.push(format!("ANTHROPIC_API_KEY={ak}")); }
+            if !ak.is_empty() { pairs.push(("ANTHROPIC_API_KEY", ak.to_string())); }
             let om = ollama_e.text();
-            if !om.is_empty() { lines.push(format!("OLLAMA_MODEL={om}")); }
+            if !om.is_empty() { pairs.push(("OLLAMA_MODEL", om.to_string())); }
 
-            let home = std::env::var("HOME").unwrap_or_default();
-            let path = std::path::PathBuf::from(&home)
-                .join(".config")
-                .join(format!("{APP_NAME}.conf"));
-            if std::fs::write(&path, lines.join("\n") + "\n").is_ok() {
-                let home = std::env::var("HOME").unwrap_or_default();
-                let bin = std::path::PathBuf::from(&home).join(".local/bin").join(APP_NAME);
-                // Shell waits until all instances are dead, then relaunches.
-                // Spawn it first — pkill will kill this process too.
-                let cmd = format!(
-                    "sleep 0.6 && pkill -x '{app}'; sleep 0.3 && exec '{bin}' &",
-                    app = APP_NAME,
-                    bin = bin.display(),
-                );
-                let _ = std::process::Command::new("sh").args(["-c", &cmd]).spawn();
+            // Met à jour champ par champ : les réglages absents du formulaire (MODEL_PATH, etc.) sont conservés.
+            let path = crate::config::conf_path();
+            let mut conf = std::fs::read_to_string(&path).unwrap_or_default();
+            for (k, v) in &pairs { conf = crate::config::update_conf(&conf, k, v); }
+            if crate::config::write_private(&path, &conf).is_ok() {
+                crate::restart::request_restart();
             }
             win_clone.close();
         });

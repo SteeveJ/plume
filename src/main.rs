@@ -4,6 +4,9 @@ mod application;
 mod config;
 mod tray;
 mod settings_gtk;
+mod sysmem;
+mod restart;
+mod hints;
 
 use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
@@ -13,9 +16,9 @@ use adapters::{
     audio::CpalRecorder,
     context::AtspiContext,
     history::SqliteHistory,
-    stt::{OpenAiWhisper, LocalWhisper, new_shared_vocab},
-    injector::EnigoInjector,
-    hotkey::RdevListener,
+    stt::{OpenAiWhisper, WhisperCpp, new_shared_vocab},
+    injector::ClipboardInjector,
+    hotkey::EvdevListener,
     notifier::NotifySend,
     scratchpad::FileScratchpad,
     processor::{OllamaProcessor, OpenAiProcessor, AnthropicProcessor, LocalProcessor},
@@ -59,23 +62,58 @@ async fn download_model(path: &std::path::Path, url: &str, expected_sha256: Opti
     use tokio::io::AsyncWriteExt;
     if let Some(dir) = path.parent() { std::fs::create_dir_all(dir)?; }
     println!("Downloading {} → {}", url, path.display());
-    let mut resp = reqwest::get(url).await?.error_for_status()?;
-    let tmp = path.with_extension("tmp");
-    let mut file = tokio::fs::File::create(&tmp).await?;
-    let mut hasher = expected_sha256.map(|_| Sha256::new());
-    while let Some(chunk) = resp.chunk().await? {
-        if let Some(h) = &mut hasher { sha2::Digest::update(h, &chunk); }
-        file.write_all(&chunk).await?;
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .read_timeout(std::time::Duration::from_secs(60))
+        .build()?;
+    let mut resp = client.get(url).send().await?.error_for_status()?;
+    if let (Some(len), Some(free)) = (resp.content_length(), sysmem::free_disk_mb(path)) {
+        let need = len / 1_048_576 + 256;
+        anyhow::ensure!(need <= free, "not enough disk space to download the model: need about {need} MB, only {free} MB free");
     }
-    file.flush().await?;
-    if let (Some(h), Some(expected)) = (hasher, expected_sha256) {
-        let actual = hex::encode(h.finalize());
-        anyhow::ensure!(actual == expected, "SHA-256 mismatch: got {actual}, expected {expected}");
-        println!("SHA-256 verified.");
+    let tmp = path.with_extension("tmp");
+    let result: Result<()> = async {
+        let mut file = tokio::fs::File::create(&tmp).await?;
+        let mut hasher = expected_sha256.map(|_| Sha256::new());
+        while let Some(chunk) = resp.chunk().await? {
+            if let Some(h) = &mut hasher { sha2::Digest::update(h, &chunk); }
+            file.write_all(&chunk).await?;
+        }
+        file.flush().await?;
+        if let (Some(h), Some(expected)) = (hasher, expected_sha256) {
+            let actual = hex::encode(h.finalize());
+            anyhow::ensure!(actual == expected, "SHA-256 mismatch: got {actual}, expected {expected}");
+            println!("SHA-256 verified.");
+        }
+        Ok(())
+    }.await;
+    if let Err(e) = result {
+        let _ = tokio::fs::remove_file(&tmp).await;
+        return Err(e);
     }
     tokio::fs::rename(&tmp, path).await?;
     println!("Done.");
     Ok(())
+}
+
+/// Charge Whisper en local : télécharge le modèle au besoin (en prévenant l'utilisateur) et refuse s'il ne tient pas en RAM.
+async fn load_local_whisper(cfg: &AppConfig, vocab: adapters::stt::SharedVocab) -> Result<WhisperCpp> {
+    let file = adapters::stt::whisper_cpp::ggml_file(&cfg.stt_model);
+    let path = data_dir().join(&file);
+    if !path.exists() {
+        sys_notify(&format!("Downloading the speech model '{}' (one time, can take a few minutes)…", cfg.stt_model));
+        download_model(&path, &adapters::stt::whisper_cpp::ggml_url(&file), None).await
+            .with_context(|| format!("could not download the speech model '{}'", cfg.stt_model))?;
+        sys_notify("Speech model downloaded");
+    }
+    let size_mb = std::fs::metadata(&path)?.len() / 1_048_576;
+    let available = sysmem::available_mb();
+    anyhow::ensure!(
+        sysmem::model_fits(size_mb, 19, available),
+        "the speech model '{}' needs about {} MB of free RAM but only {} MB are available — choose a smaller STT_MODEL (for example base or small-q8_0) in Settings, or free some memory",
+        cfg.stt_model, sysmem::required_mb(size_mb, 19), available.unwrap_or(0)
+    );
+    WhisperCpp::load(&path, &cfg.stt_lang, vocab)
 }
 
 fn install_autostart() -> Result<()> {
@@ -100,11 +138,10 @@ fn install_autostart() -> Result<()> {
     println!("Installed: {}", icon_rec_path.display());
     // Refresh icon theme cache — skip gracefully if tool is absent (minimal installs).
     let icon_base = PathBuf::from(&home).join(".local/share/icons/hicolor");
-    if std::process::Command::new("which").arg("gtk-update-icon-cache").output().map(|o| o.status.success()).unwrap_or(false) {
-        let _ = std::process::Command::new("gtk-update-icon-cache")
-            .args(["-f", "-t", icon_base.to_str().unwrap_or("")]).spawn();
-    }
-    let _ = std::process::Command::new("touch").arg(&icon_base).spawn();
+    // `spawn` échoue simplement si l'outil est absent.
+    let _ = std::process::Command::new("gtk-update-icon-cache")
+        .args(["-f", "-t", icon_base.to_str().unwrap_or("")]).spawn();
+    let _ = std::fs::File::open(&icon_base).and_then(|f| f.set_modified(std::time::SystemTime::now()));
 
     // .desktop entry
     let apps_dir = PathBuf::from(&home).join(".local/share/applications");
@@ -156,6 +193,20 @@ async fn ollama_available(_model: &str) -> bool {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    if std::env::args().any(|a| a == "--restart") {
+        return restart::restart_daemon();
+    }
+    let result = run().await;
+    if let Err(e) = &result {
+        // Lancé depuis l'autostart, il n'y a pas de terminal : la notification est le seul retour à l'utilisateur.
+        let msg = format!("{e:#}");
+        let hint = hints::startup_hint(&msg).map(|h| format!("\n{h}")).unwrap_or_default();
+        sys_notify(&format!("Plume could not start: {msg}{hint}"));
+    }
+    result
+}
+
+async fn run() -> Result<()> {
     if std::env::args().any(|a| a == "--install") {
         return install_autostart();
     }
@@ -180,7 +231,13 @@ async fn main() -> Result<()> {
         )
         .init();
 
+    config::ensure_data_dir();
     let cfg = AppConfig::load()?;
+    if let Ok(conf) = std::fs::read_to_string(config::conf_path()) {
+        if let Some(w) = config::conf_warnings(&conf).first() {
+            sys_notify(&format!("{APP_NAME}.conf: {w}"));
+        }
+    }
 
     let processor_label = match &cfg.processor {
         config::ProcessorKind::Local     => "Local (Qwen)".into(),
@@ -211,18 +268,22 @@ async fn main() -> Result<()> {
 
     let vocab = new_shared_vocab(&cfg.stt_prompt);
 
-    let stt: Box<dyn domain::ports::stt::SpeechToText> =
-        if let Some(w) = LocalWhisper::detect(&cfg.stt_model, &cfg.stt_lang, vocab.clone()) {
-            tracing::info!("using local whisper server ({} on GPU)", cfg.stt_model);
+    let local_whisper = load_local_whisper(&cfg, vocab.clone()).await;
+    let stt: Box<dyn domain::ports::stt::SpeechToText> = match local_whisper {
+        Ok(w) => {
+            tracing::info!("using local whisper.cpp ({})", cfg.stt_model);
             Box::new(w)
-        } else {
-            let key = cfg.openai_key.clone().context(
-                "OpenAI API key not found.\n\
+        }
+        Err(e) => {
+            tracing::warn!("local whisper unavailable ({e:#}), trying OpenAI");
+            let key = cfg.openai_key.clone().with_context(|| format!(
+                "OpenAI API key not found and the local speech model is unavailable ({e:#}). \
                  Set OPENAI_API_KEY or add OPENAI_API_KEY=sk-... to ~/.config/{APP_NAME}.conf"
-            )?;
+            ))?;
             tracing::info!("using OpenAI Whisper API");
             Box::new(OpenAiWhisper::new(key, &cfg.stt_lang, vocab.clone()))
-        };
+        }
+    };
 
     let prompt = style_prompt(&cfg.processor_style, &cfg.stt_lang);
     let needs_rewrite = !matches!(cfg.processor_style.as_str(), "clean" | "");
@@ -315,10 +376,10 @@ async fn main() -> Result<()> {
     let atspi_ctx = AtspiContext::spawn().await;
 
     let recorder = CpalRecorder::new().context("init audio recorder")?;
-    let injector = EnigoInjector::new().context("init text injector")?;
+    let injector = ClipboardInjector::new().context("init text injector")?;
 
     let (tx, rx) = mpsc::channel();
-    let listener = RdevListener { key: cfg.hotkey, mode: cfg.mode };
+    let listener = EvdevListener { key: cfg.hotkey, mode: cfg.mode };
     thread::spawn(move || {
         if let Err(e) = listener.listen(tx) {
             tracing::error!("hotkey listener: {e}");
@@ -326,7 +387,13 @@ async fn main() -> Result<()> {
     });
 
     tracing::info!("ready — {cfg_hotkey:?} ({cfg_mode} mode)", cfg_hotkey = cfg.hotkey, cfg_mode = cfg.mode);
-    sys_notify("ready");
+    let key = format!("{:?}", cfg.hotkey).trim_start_matches("KEY_").to_owned();
+    sys_notify(&match (cfg.mode, cfg.ui_lang) {
+        (config::HotkeyMode::Hold, config::UiLang::Fr)   => format!("Prêt — maintenez {key} et parlez"),
+        (config::HotkeyMode::Hold, config::UiLang::En)   => format!("Ready — hold {key} and speak"),
+        (config::HotkeyMode::Toggle, config::UiLang::Fr) => format!("Prêt — appuyez sur {key} pour démarrer/arrêter"),
+        (config::HotkeyMode::Toggle, config::UiLang::En) => format!("Ready — press {key} to start/stop"),
+    });
 
     let notifier = Box::new(NotifySend);
     let scratchpad = Box::new(FileScratchpad::new(data_dir().join("scratch.txt")));
@@ -336,7 +403,9 @@ async fn main() -> Result<()> {
         .with_state_tx(state_tx)
         .with_output(cfg.output)
         .with_ui_lang(cfg.ui_lang)
-        .with_vocab(vocab);
+        .with_vocab(vocab)
+        .with_content_guard(!needs_rewrite)
+        .with_snippets(application::snippets::load());
     if let Some(h) = history { service = service.with_history(h); }
     if let Some(ctx) = atspi_ctx { service = service.with_context_reader(Box::new(ctx)); }
 

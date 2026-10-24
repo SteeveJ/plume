@@ -6,7 +6,7 @@ A lightweight voice dictation daemon for Linux. Hold (or toggle) a hotkey to rec
 
 ## Features
 
-- **GPU-accelerated STT** — Whisper turbo via a persistent Python server (~60ms warm)
+- **GPU-accelerated STT** — Whisper (whisper.cpp, in-process, no Python)
 - **Local LLM correction** — Qwen3 0.6B on GPU via llama.cpp (~50ms, fixes typos & punctuation)
 - **Silence detection** — RMS + Whisper `no_speech_prob` filters reject noise and disconnected mic
 - **Live vocabulary learning** — capitalised words and acronyms auto-appended to `vocab.txt`
@@ -18,7 +18,6 @@ A lightweight voice dictation daemon for Linux. Hold (or toggle) a hotkey to rec
 
 ### System
 - Linux kernel ≥ 4.5 with `CONFIG_INPUT_UINPUT` (standard on all desktop distros)
-- Python 3 in `PATH`
 - GTK4 runtime
 - A running D-Bus session (standard on all desktop environments)
 - **uinput permissions**: add yourself to the `input` group and install the udev rule:
@@ -30,12 +29,9 @@ sudo usermod -aG input $USER
 # log out and back in
 ```
 
-### Python (Whisper)
-```bash
-pip install -r assets/requirements.txt
-# or with CUDA:
-pip install openai-whisper torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
-```
+### Whisper
+Built in (whisper.cpp, no Python). The `ggml` model for `STT_MODEL` is downloaded automatically on first launch into `~/.local/share/plume/`.
+Build needs `cmake`, a C/C++ compiler and binutils (`nm`, `objcopy`) — nothing at runtime.
 
 ### Rust toolchain
 ```bash
@@ -83,7 +79,7 @@ Edit `~/.config/plume.conf` or use the settings window (tray → Settings).
 |-----|---------|-------------|
 | `HOTKEY` | `KEY_RIGHTCTRL` | Recording key |
 | `MODE` | `hold` | `hold` or `toggle` |
-| `STT_MODEL` | `turbo` | Whisper model size |
+| `STT_MODEL` | `turbo` | Whisper model size (`tiny` … `large-v2`, `turbo`; quantized variants such as `small-q8_0` use less RAM) |
 | `STT_LANG` | `fr` | Language (`fr`, `en`, … or empty for auto-detect) |
 | `PROCESSOR` | `local` | `local` / `openai` / `anthropic` / `ollama` / `none` |
 | `PROCESSOR_STYLE` | `clean` | `clean` / `professional` / `diplomatic` / `assertive` / `humor` |
@@ -101,14 +97,14 @@ Total                 ~260 ms
 ## Architecture
 
 ```
-CpalRecorder → DictationService → LocalWhisper (persistent Python subprocess)
+CpalRecorder → DictationService → WhisperCpp (whisper.cpp, in-process)
                                 → LocalProcessor (llama.cpp, CUDA/Vulkan/CPU)
                                 → EnigoInjector (uinput Ctrl+V)
 ```
 
 **Design notes**
 - `TextProcessor` is the central bridge between STT, LLM, tray, and vocab — the highest-connectivity node in the graph
-- Python dependency (openai-whisper, torch) is declared in docs only; the Rust binary itself has zero Python coupling at compile time
+- Whisper (whisper.cpp) and the LLM (llama.cpp) live in the same binary: `vendor/whisper-rs-sys` prefixes whisper's ggml symbols at build time to avoid clashing with llama's
 - Zero runtime binary deps: arboard+uinput (no wl-copy/xdotool), notify-rust D-Bus (no notify-send), XDG autostart (no systemd user service needed) — everything works out of the box on any desktop
 
 ## Distro compatibility
@@ -124,8 +120,7 @@ CpalRecorder → DictationService → LocalWhisper (persistent Python subprocess
 ## Known Issues / TODO
 
 **Must fix**
-- [ ] `local_whisper.rs` — `device="cuda"` hardcoded: CPU-only machines crash silently, OpenAI fallback never triggers
-- [ ] `local_whisper.rs` — personal dev path `/home/skyro/WanGP/.venv/bin/python` in Python candidates list
+- [x] Local Whisper: Python server removed (whisper.cpp in-process); falls back to OpenAI if the model can't be loaded or downloaded
 
 **Should fix**
 - [ ] `main.rs` — `ollama_available()` fires a full inference request; replace with `GET /api/version`
@@ -141,7 +136,7 @@ Un daemon de dictée vocale léger pour Linux. Maintenez (ou basculez) un raccou
 
 ## Fonctionnalités
 
-- **STT accéléré GPU** — Whisper turbo via un serveur Python persistant (~60ms chaud)
+- **STT accéléré GPU** — Whisper (whisper.cpp en processus, sans Python)
 - **Correction LLM local** — Qwen3 0.6B sur GPU via llama.cpp (~50ms, corrige fautes & ponctuation)
 - **Détection de silence** — RMS + `no_speech_prob` Whisper filtrent le bruit / micro débranché
 - **Apprentissage du vocabulaire** — mots capitalisés et acronymes ajoutés automatiquement à `vocab.txt`
@@ -153,7 +148,6 @@ Un daemon de dictée vocale léger pour Linux. Maintenez (ou basculez) un raccou
 
 ### Système
 - Noyau Linux ≥ 4.5 avec `CONFIG_INPUT_UINPUT`
-- Python 3 dans le `PATH`
 - GTK4
 - Session D-Bus active
 
@@ -166,12 +160,9 @@ sudo usermod -aG input $USER
 # se déconnecter et se reconnecter
 ```
 
-### Python (Whisper)
-```bash
-pip install -r assets/requirements.txt
-# ou avec CUDA :
-pip install openai-whisper torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
-```
+### Whisper
+Intégré (whisper.cpp, sans Python). Le modèle `ggml` correspondant à `STT_MODEL` est téléchargé automatiquement au premier lancement dans `~/.local/share/plume/`.
+Le build nécessite `cmake`, un compilateur C/C++ et binutils (`nm`, `objcopy`) — rien à l'exécution.
 
 ## Installation
 
@@ -199,7 +190,7 @@ Modifiez `~/.config/plume.conf` ou utilisez la fenêtre de paramètres (icône �
 |-----|--------|-------------|
 | `HOTKEY` | `KEY_RIGHTCTRL` | Touche d'enregistrement |
 | `MODE` | `hold` | `hold` (maintien) ou `toggle` (bascule) |
-| `STT_MODEL` | `turbo` | Taille du modèle Whisper |
+| `STT_MODEL` | `turbo` | Taille du modèle Whisper (`tiny` … `large-v2`, `turbo` ; les variantes quantifiées comme `small-q8_0` utilisent moins de RAM) |
 | `STT_LANG` | `fr` | Langue (`fr`, `en`, … ou vide pour auto) |
 | `PROCESSOR` | `local` | `local` / `openai` / `anthropic` / `ollama` / `none` |
 | `PROCESSOR_STYLE` | `clean` | `clean` / `professional` / `diplomatic` / `assertive` / `humor` |

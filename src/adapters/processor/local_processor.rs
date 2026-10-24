@@ -9,14 +9,24 @@ use llama_cpp_2::{
 };
 use std::num::NonZeroU32;
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use crate::domain::ports::processor::TextProcessor;
 
-pub struct LocalProcessor {
+// Budget de génération fixe (Qwen3 peut "réfléchir" jusqu'à 1024 tokens malgré /nothink) ; KV cache = prompt + budget au lieu de 4096 fixes (~450 Mo).
+const MAX_NEW: u32 = 1024;
+fn ctx_sizes(n_prompt: usize) -> (u32, u32) {
+    (n_prompt as u32 + MAX_NEW, MAX_NEW)
+}
+
+struct Inner {
     backend: LlamaBackend,
     model: LlamaModel,
     _lock: Mutex<()>,
     system_prompt: String,
+}
+
+pub struct LocalProcessor {
+    inner: Arc<Inner>,
 }
 
 impl LocalProcessor {
@@ -24,21 +34,25 @@ impl LocalProcessor {
         let backend = LlamaBackend::init().context("init llama backend")?;
         let model = LlamaModel::load_from_file(&backend, path, &LlamaModelParams::default())
             .context("load model")?;
-        Ok(Self { backend, model, _lock: Mutex::new(()), system_prompt: system_prompt.into() })
+        Ok(Self { inner: Arc::new(Inner { backend, model, _lock: Mutex::new(()), system_prompt: system_prompt.into() }) })
     }
+}
 
+impl Inner {
     fn generate(&self, prompt: &str) -> Result<String> {
         let _guard = self._lock.lock().unwrap();
-        let ctx_params = LlamaContextParams::default()
-            .with_n_ctx(NonZeroU32::new(4096));
-        // shortcut: context recreated per call (~100ms); LlamaContext<'model> borrows self prevents caching
-        let mut ctx = self.model.new_context(&self.backend, ctx_params)
-            .context("new context")?;
-
         let vocab = self.model.vocab();
         let tokens = vocab.tokenize(prompt.as_bytes(), true, true);
         let n_prompt = tokens.len();
         anyhow::ensure!(n_prompt > 0, "empty prompt");
+
+        let (n_ctx, max_new) = ctx_sizes(n_prompt);
+        let ctx_params = LlamaContextParams::default()
+            .with_n_ctx(NonZeroU32::new(n_ctx))
+            .with_n_batch(n_prompt as u32);
+        // shortcut: context recreated per call (~100ms); LlamaContext<'model> borrows self prevents caching
+        let mut ctx = self.model.new_context(&self.backend, ctx_params)
+            .context("new context")?;
 
         let mut batch = LlamaBatch::new(n_prompt, 1);
         for (i, &tok) in tokens.iter().enumerate() {
@@ -51,7 +65,7 @@ impl LocalProcessor {
         let mut sampler = LlamaSampler::greedy();
         let mut out: Vec<u8> = Vec::new();
 
-        for pos in (n_prompt as i32)..(n_prompt as i32 + 1024) {
+        for pos in (n_prompt as i32)..(n_prompt as i32 + max_new as i32) {
             let tok = sampler.sample(&ctx, batch.n_tokens() - 1);
             sampler.accept(tok);
             if tok == eos { break; }
@@ -84,8 +98,21 @@ impl TextProcessor for LocalProcessor {
             "<|im_start|>system\n{}<|im_end|>\n\
              <|im_start|>user\n{raw} /nothink<|im_end|>\n\
              <|im_start|>assistant\n",
-            self.system_prompt
+            self.inner.system_prompt
         );
-        tokio::task::block_in_place(|| self.generate(&prompt))
+        // Hors du thread async : la boucle de dictée reste libre de voir une nouvelle pression de touche.
+        let inner = self.inner.clone();
+        tokio::task::spawn_blocking(move || inner.generate(&prompt)).await.context("llm task")?
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ctx_sizes;
+
+    #[test]
+    fn ctx_scales_with_prompt_and_stays_bounded() {
+        assert_eq!(ctx_sizes(100), (1124, 1024));
+        assert_eq!(ctx_sizes(3000), (4024, 1024));
     }
 }

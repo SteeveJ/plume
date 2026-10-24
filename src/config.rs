@@ -68,6 +68,95 @@ pub fn default_model_path() -> PathBuf {
     data_dir().join("model.gguf")
 }
 
+pub fn conf_path() -> PathBuf {
+    PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".config").join(format!("{APP_NAME}.conf"))
+}
+
+/// Écrit un fichier lisible par son seul propriétaire (clés d'API, historique des dictées).
+pub fn write_private(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(path)?;
+    f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    f.write_all(contents.as_bytes())
+}
+
+/// Crée le dossier de données en 0700 et resserre un dossier existant.
+pub fn ensure_data_dir() -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = data_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+    dir
+}
+
+/// Resserre un fichier existant en 0600 (les fichiers créés avant ce correctif étaient lisibles par tous).
+pub fn restrict_file(path: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt;
+    if path.exists() {
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    }
+}
+
+/// Remplace la valeur de `key` (clé exacte) ou l'ajoute ; le reste du fichier est conservé.
+pub fn update_conf(contents: &str, key: &str, value: &str) -> String {
+    let new_line = format!("{key}={value}");
+    let (mut out, mut done) = (Vec::new(), false);
+    for line in contents.lines() {
+        let is_key = !line.trim_start().starts_with('#')
+            && line.split_once('=').is_some_and(|(k, _)| k.trim() == key);
+        if !is_key { out.push(line.to_string()); }
+        else if !done { out.push(new_line.clone()); done = true; }
+    }
+    if !done { out.push(new_line); }
+    out.join("\n") + "\n"
+}
+
+/// Met à jour une clé du fichier de config sans toucher aux autres réglages.
+pub fn set_conf_key(key: &str, value: &str) {
+    let path = conf_path();
+    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    let _ = write_private(&path, &update_conf(&existing, key, value));
+}
+
+const KNOWN_KEYS: &[&str] = &[
+    "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "HOTKEY", "MODE", "OLLAMA_MODEL", "OPENAI_PROCESSOR_MODEL",
+    "ANTHROPIC_MODEL", "MODEL_PATH", "MODEL_URL", "MODEL_SHA256", "MODEL_REPO", "MODEL_PATTERN", "PROCESSOR",
+    "OUTPUT", "STT_LANG", "STT_MODEL", "STT_PROMPT", "APP_LANG", "PROCESSOR_STYLE",
+];
+
+/// Repère les fautes de frappe qui seraient sinon ignorées en silence (ex. `PROCESSOR=olama` retombe sur le LLM local et lance un téléchargement).
+pub fn conf_warnings(contents: &str) -> Vec<String> {
+    let choices: &[(&str, &[&str])] = &[
+        ("MODE", &["hold", "toggle"]),
+        ("PROCESSOR", &["local", "ollama", "openai", "anthropic", "none"]),
+        ("OUTPUT", &["inject", "scratchpad", "both"]),
+        ("APP_LANG", &["en", "fr"]),
+        ("PROCESSOR_STYLE", &["", "clean", "soften", "diplomatic", "professional", "assertive", "humor"]),
+    ];
+    let mut out = Vec::new();
+    for (i, raw) in contents.lines().enumerate() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') { continue; }
+        let n = i + 1;
+        let Some((k, v)) = line.split_once('=') else {
+            out.push(format!("line {n}: expected KEY=VALUE, ignored"));
+            continue;
+        };
+        let (k, v) = (k.trim(), v.trim());
+        if !KNOWN_KEYS.contains(&k) {
+            out.push(format!("line {n}: unknown setting {k}"));
+        } else if let Some((_, ok)) = choices.iter().find(|(name, _)| *name == k) {
+            if !ok.contains(&v) { out.push(format!("line {n}: {k}={v} is not valid (use: {})", ok.join(", "))); }
+        } else if k == "HOTKEY" && parse_key(v).is_err() {
+            out.push(format!("line {n}: HOTKEY={v} is not a supported key"));
+        } else if k == "STT_MODEL" && !v.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c)) {
+            out.push(format!("line {n}: STT_MODEL={v} is not a valid model name"));
+        }
+    }
+    out
+}
+
 #[derive(Clone, Copy)]
 pub enum HotkeyMode { Hold, Toggle }
 
@@ -145,8 +234,8 @@ pub struct AppConfig {
 
 impl AppConfig {
     pub fn load() -> Result<Self> {
-        let home = std::env::var("HOME").context("HOME not set")?;
-        let path = PathBuf::from(&home).join(".config").join(format!("{APP_NAME}.conf"));
+        std::env::var("HOME").context("HOME not set")?;
+        let path = conf_path();
 
         let mut hotkey_str = "KEY_RIGHTCTRL".to_owned();
         let mut mode = HotkeyMode::Hold;
@@ -170,10 +259,12 @@ impl AppConfig {
 
         if !path.exists() {
             let _ = std::fs::create_dir_all(path.parent().unwrap());
-            let _ = std::fs::write(&path, DEFAULT_CONF);
+            let _ = write_private(&path, DEFAULT_CONF);
         }
+        restrict_file(&path);
 
         if let Ok(contents) = std::fs::read_to_string(&path) {
+            for w in conf_warnings(&contents) { tracing::warn!("{}: {w}", path.display()); }
             for raw in contents.lines() {
                 let line = raw.trim();
                 if line.starts_with('#') { continue; }
@@ -267,4 +358,44 @@ pub fn parse_key(s: &str) -> Result<Key> {
             "unknown HOTKEY '{other}'; valid: KEY_RIGHTCTRL, KEY_RIGHTALT, KEY_PAUSE, KEY_INSERT, KEY_F1..F12, etc."
         ),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn update_conf_replaces_exact_key_only() {
+        let c = "PROCESSOR=local\nPROCESSOR_STYLE=professional\n#PROCESSOR=none\n";
+        let u = update_conf(c, "PROCESSOR", "openai");
+        assert_eq!(u, "PROCESSOR=openai\nPROCESSOR_STYLE=professional\n#PROCESSOR=none\n");
+        assert_eq!(update_conf("A=1\n", "B", "2"), "A=1\nB=2\n");
+    }
+
+    #[test]
+    fn conf_warnings_catch_typos_and_accept_defaults() {
+        assert!(conf_warnings(DEFAULT_CONF).is_empty(), "{:?}", conf_warnings(DEFAULT_CONF));
+        let w = conf_warnings("PROCESSOR=olama\nMODE=toogle\nHOTKEY=KEY_NOPE\nFOO=1\nbad line\nSTT_MODEL=small q8\n");
+        assert_eq!(w.len(), 6, "{w:?}");
+        assert!(w[0].contains("PROCESSOR=olama"));
+    }
+
+    #[test]
+    fn parse_key_accepts_known_and_rejects_unknown() {
+        assert!(matches!(parse_key(" KEY_F9 ").unwrap(), Key::KEY_F9));
+        assert!(parse_key("KEY_BANANA").is_err());
+    }
+
+    #[test]
+    fn write_private_forces_owner_only_even_on_existing_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let p = std::env::temp_dir().join(format!("plume-test-{}.conf", std::process::id()));
+        std::fs::write(&p, "old").unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o644)).unwrap();
+        write_private(&p, "OPENAI_API_KEY=sk-x\n").unwrap();
+        let mode = std::fs::metadata(&p).unwrap().permissions().mode() & 0o777;
+        let body = std::fs::read_to_string(&p).unwrap();
+        let _ = std::fs::remove_file(&p);
+        assert_eq!((mode, body.as_str()), (0o600, "OPENAI_API_KEY=sk-x\n"));
+    }
 }

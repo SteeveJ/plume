@@ -14,7 +14,7 @@ pub struct OllamaProcessor {
 impl OllamaProcessor {
     pub fn new(model: impl Into<String>, system_prompt: impl Into<String>) -> Self {
         Self {
-            client: Client::new(),
+            client: crate::adapters::http::client(std::time::Duration::from_secs(60)),
             base_url: "http://localhost:11434".to_string(),
             model: model.into(),
             system_prompt: system_prompt.into(),

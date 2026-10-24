@@ -13,7 +13,7 @@ pub struct AnthropicProcessor {
 
 impl AnthropicProcessor {
     pub fn new(api_key: impl Into<String>, model: impl Into<String>, system_prompt: impl Into<String>) -> Self {
-        Self { client: Client::new(), api_key: api_key.into(), model: model.into(), system_prompt: system_prompt.into() }
+        Self { client: crate::adapters::http::client(std::time::Duration::from_secs(30)), api_key: api_key.into(), model: model.into(), system_prompt: system_prompt.into() }
     }
 }
 

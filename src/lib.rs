@@ -4,3 +4,6 @@ pub mod application;
 pub mod config;
 pub mod tray;
 pub mod settings_gtk;
+pub mod sysmem;
+pub mod restart;
+pub mod hints;

@@ -4,3 +4,9 @@
 #   Ubuntu/Debian: CUDA_PATH=/usr/local/cuda
 #   Fedora:        CUDA_PATH=/usr/local/cuda
 # Example: CUDA_PATH=/opt/cuda cargo build --release --features cuda
+
+# Feature `opus` (défaut) : libopus compilée depuis les sources et liée statiquement (aucune lib système requise, cmake seulement au build).
+[env]
+LIBOPUS_NO_PKG = "1"
+LIBOPUS_STATIC = "1"
+CMAKE_POLICY_VERSION_MINIMUM = "3.5"

@@ -1,2 +1,2 @@
-pub mod enigo_injector;
-pub use enigo_injector::EnigoInjector;
+pub mod clipboard_injector;
+pub use clipboard_injector::ClipboardInjector;

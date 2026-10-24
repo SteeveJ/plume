@@ -109,7 +109,7 @@ impl Tray for WisprTray {
                 checked: self.mode_toggle,
                 activate: Box::new(|this: &mut Self| {
                     this.mode_toggle = !this.mode_toggle;
-                    set_conf_key("MODE", if this.mode_toggle { "toggle" } else { "hold" });
+                    crate::config::set_conf_key("MODE", if this.mode_toggle { "toggle" } else { "hold" });
                 }),
                 ..Default::default()
             }.into(),
@@ -119,16 +119,16 @@ impl Tray for WisprTray {
                 label: format!("Processor: {}", self.processor_label),
                 submenu: vec![
                     StandardItem { label: "Local (Qwen)".into(),
-                        activate: Box::new(|_: &mut Self| set_conf_key("PROCESSOR", "local")),
+                        activate: Box::new(|_: &mut Self| crate::config::set_conf_key("PROCESSOR", "local")),
                         ..Default::default() }.into(),
                     StandardItem { label: "Ollama".into(),
-                        activate: Box::new(|_: &mut Self| set_conf_key("PROCESSOR", "ollama")),
+                        activate: Box::new(|_: &mut Self| crate::config::set_conf_key("PROCESSOR", "ollama")),
                         ..Default::default() }.into(),
                     StandardItem { label: "OpenAI".into(),
-                        activate: Box::new(|_: &mut Self| set_conf_key("PROCESSOR", "openai")),
+                        activate: Box::new(|_: &mut Self| crate::config::set_conf_key("PROCESSOR", "openai")),
                         ..Default::default() }.into(),
                     StandardItem { label: "None".into(),
-                        activate: Box::new(|_: &mut Self| set_conf_key("PROCESSOR", "none")),
+                        activate: Box::new(|_: &mut Self| crate::config::set_conf_key("PROCESSOR", "none")),
                         ..Default::default() }.into(),
                 ],
                 ..Default::default()
@@ -165,18 +165,7 @@ impl Tray for WisprTray {
             StandardItem {
                 label: "Reload config".into(),
                 icon_name: "view-refresh".into(),
-                activate: Box::new(move |_: &mut Self| {
-                    if let Ok(exe) = std::env::current_exe() {
-                        let home = std::env::var("HOME").unwrap_or_default();
-                        let cmd = format!(
-                            "sleep 0.4 && pkill -x '{app}'; sleep 0.2 && exec '{bin}' &",
-                            app = APP_NAME,
-                            bin = std::path::PathBuf::from(&home).join(".local/bin").join(APP_NAME).display(),
-                        );
-                        let _ = std::process::Command::new("sh").args(["-c", &cmd]).spawn();
-                        drop(exe);
-                    }
-                }),
+                activate: Box::new(|_: &mut Self| crate::restart::request_restart()),
                 ..Default::default()
             }.into(),
 
@@ -189,21 +178,6 @@ impl Tray for WisprTray {
             }.into(),
         ]
     }
-}
-
-/// Write or update a single key=value in the conf file.
-fn set_conf_key(key: &str, value: &str) {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let path = std::path::PathBuf::from(&home)
-        .join(".config")
-        .join(format!("{APP_NAME}.conf"));
-    let existing = std::fs::read_to_string(&path).unwrap_or_default();
-    let mut lines: Vec<String> = existing.lines()
-        .filter(|l| !l.trim_start().starts_with(key))
-        .map(String::from)
-        .collect();
-    lines.push(format!("{key}={value}"));
-    let _ = std::fs::write(&path, lines.join("\n") + "\n");
 }
 
 #[cfg(test)]

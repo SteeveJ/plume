@@ -3,11 +3,11 @@
 use std::time::{Duration, Instant};
 use plume::{
     adapters::{
-        stt::{LocalWhisper, new_shared_vocab},
-        injector::EnigoInjector,
+        stt::{WhisperCpp, new_shared_vocab, whisper_cpp::ggml_file},
+        injector::ClipboardInjector,
         processor::LocalProcessor,
     },
-    config::{AppConfig, style_prompt},
+    config::{AppConfig, data_dir, style_prompt},
     domain::model::AudioSamples,
     domain::ports::{stt::SpeechToText, processor::TextProcessor, injector::TextInjector},
 };
@@ -56,14 +56,11 @@ async fn main() {
     hr();
 
     let vocab = new_shared_vocab(&cfg.stt_prompt);
-    let whisper = match LocalWhisper::detect(&cfg.stt_model, &cfg.stt_lang, vocab) {
-        Some(w) => w,
-        None => { eprintln!("whisper not found"); return; }
-    };
-
-    // Cold start (model load)
     let t0 = Instant::now();
-    let _ = whisper.transcribe(&make_audio(1.0)).await;
+    let whisper = match WhisperCpp::load(&data_dir().join(ggml_file(&cfg.stt_model)), &cfg.stt_lang, vocab) {
+        Ok(w) => w,
+        Err(e) => { eprintln!("whisper not found: {e:#}"); return; }
+    };
     print_row("Cold start (model load)", t0.elapsed());
 
     // Warm inference at various audio lengths
@@ -82,7 +79,7 @@ async fn main() {
     hr();
 
     let proc_result = match LocalProcessor::load(&cfg.model_path,
-        &style_prompt(&cfg.processor_style, &cfg.stt_lang))
+        style_prompt(&cfg.processor_style, &cfg.stt_lang))
     {
         Ok(p) => {
             for &words in &[20usize, 50, 100, 200] {
@@ -109,7 +106,7 @@ async fn main() {
     println!("Phase 3 — Inject (clipboard + uinput Ctrl+V)");
     hr();
 
-    let inject_d = match EnigoInjector::new() {
+    let inject_d = match ClipboardInjector::new() {
         Ok(inj) => {
             // Startup settle (already paid)
             let long = sample_text(50);
@@ -143,7 +140,7 @@ async fn main() {
     // Processor for 50-word text (typical output of 5s speech)
     let proc_50 = if proc_result {
         if let Ok(p) = LocalProcessor::load(&cfg.model_path,
-            &style_prompt(&cfg.processor_style, &cfg.stt_lang))
+            style_prompt(&cfg.processor_style, &cfg.stt_lang))
         {
             let t = Instant::now();
             let _ = p.process(&sample_text(50)).await;

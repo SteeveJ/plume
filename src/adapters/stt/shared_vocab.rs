@@ -28,17 +28,34 @@ pub fn extract_words(text: &str, existing: &str) -> Vec<String> {
             && clean.chars().next().map(|c| c.is_uppercase()).unwrap_or(false);
         let is_acronym = clean.len() >= 2 && clean.chars().all(|c| c.is_uppercase());
 
-        if is_mid_sentence_cap || is_acronym {
-            if !existing.contains(clean.as_str())
-                && !new_words.contains(&clean)
-            {
-                new_words.push(clean);
-            }
+        if (is_mid_sentence_cap || is_acronym)
+            && !existing.contains(clean.as_str())
+            && !new_words.contains(&clean)
+        {
+            new_words.push(clean);
         }
 
         prev_is_boundary = word.ends_with(['.', '!', '?']);
     }
     new_words
+}
+
+/// Append newly learned words to vocab.txt and return the updated full prompt.
+pub fn persist_words(words: &[String]) -> Option<String> {
+    if words.is_empty() { return None; }
+    let path = data_dir().join("vocab.txt");
+    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    let new_line = words.join(", ");
+    let header = if existing.contains("# auto-learned") { "" } else { "\n# auto-learned" };
+    let updated = format!("{}{header}\n{new_line}\n", existing.trim_end());
+    std::fs::write(&path, &updated).ok()?;
+    // Return the flat list of all non-comment words for the prompt
+    Some(
+        updated.lines()
+            .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
 }
 
 #[cfg(test)]
@@ -70,21 +87,4 @@ mod tests {
         let words = extract_words("I love Paris", "Paris");
         assert!(!words.contains(&"Paris".to_string()), "already in vocab");
     }
-}
-
-/// Append newly learned words to vocab.txt and return the updated full prompt.
-pub fn persist_words(words: &[String]) -> Option<String> {
-    if words.is_empty() { return None; }
-    let path = data_dir().join("vocab.txt");
-    let existing = std::fs::read_to_string(&path).unwrap_or_default();
-    let new_line = words.join(", ");
-    let updated = format!("{existing}\n# auto-learned\n{new_line}\n");
-    std::fs::write(&path, &updated).ok()?;
-    // Return the flat list of all non-comment words for the prompt
-    Some(
-        updated.lines()
-            .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
-            .collect::<Vec<_>>()
-            .join(", ")
-    )
 }

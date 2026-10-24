@@ -20,6 +20,38 @@ use crate::domain::ports::{
     stt::SpeechToText,
 };
 use crate::adapters::stt::SharedVocab;
+use super::snippets::{self, Snippet};
+
+const CHUNK_CHARS: usize = 350;
+
+/// Cause de l'erreur en une ligne courte, lisible dans une notification.
+fn short_reason(e: &anyhow::Error) -> String {
+    let full = format!("{e:#}");
+    let mut s: String = full.chars().take(90).collect();
+    if s.len() < full.len() { s.push('…'); }
+    s
+}
+
+/// Coupe après une fin de phrase une fois ~350 caractères atteints ; aucun mot n'est perdu.
+fn split_chunks(text: &str) -> Vec<&str> {
+    let (mut chunks, mut start, mut prev) = (Vec::new(), 0, '\0');
+    for (i, c) in text.char_indices() {
+        if c.is_whitespace() && matches!(prev, '.' | '!' | '?') && i - start >= CHUNK_CHARS {
+            chunks.push(text[start..i].trim());
+            start = i;
+        }
+        prev = c;
+    }
+    let last = text[start..].trim();
+    if !last.is_empty() || chunks.is_empty() { chunks.push(last); }
+    chunks
+}
+
+/// Vrai si la sortie a perdu plus de 10 % des mots : le prompt "clean" demande de préserver les mots exacts (ignoré sous 12 mots).
+fn lost_content(input: &str, output: &str) -> bool {
+    let (a, b) = (input.split_whitespace().count(), output.split_whitespace().count());
+    a >= 12 && b * 10 < a * 9
+}
 
 pub struct DictationService<R, S, I> {
     recorder: R,
@@ -34,6 +66,8 @@ pub struct DictationService<R, S, I> {
     output: OutputMode,
     ui_lang: UiLang,
     vocab: Option<SharedVocab>,
+    snippets: Vec<Snippet>,
+    content_guard: bool,
 }
 
 impl<R, S, I> DictationService<R, S, I>
@@ -59,6 +93,8 @@ where
             output: OutputMode::Inject,
             ui_lang: UiLang::En,
             vocab: None,
+            snippets: Vec::new(),
+            content_guard: true,
         }
     }
 
@@ -68,6 +104,9 @@ where
     pub fn with_state_tx(mut self, tx: SyncSender<bool>) -> Self { self.state_tx = Some(tx); self }
     pub fn with_output(mut self, m: OutputMode) -> Self { self.output = m; self }
     pub fn with_ui_lang(mut self, l: UiLang) -> Self { self.ui_lang = l; self }
+    /// Désactiver pour les styles qui reformulent (le texte peut alors raccourcir légitimement).
+    pub fn with_content_guard(mut self, on: bool) -> Self { self.content_guard = on; self }
+    pub fn with_snippets(mut self, s: Vec<Snippet>) -> Self { self.snippets = s; self }
     pub fn with_vocab(mut self, v: SharedVocab) -> Self { self.vocab = Some(v); self }
 
     pub async fn run(&mut self, events: Receiver<HotkeyEvent>) -> Result<()> {
@@ -80,24 +119,19 @@ where
             let event = match erx.recv().await { Some(e) => e, None => break };
             match event {
                 HotkeyEvent::RecordStart if !recording => {
-                    tracing::info!("recording…");
-                    self.recorder.start()?;
-                    recording = true;
-                    self.set_state(true);
-                    self.notifier.notify(t("🎤 Recording…", "🎤 Enregistrement…", self.ui_lang));
+                    recording = self.begin_recording();
                 }
                 HotkeyEvent::RecordStop if recording => {
                     recording = false;
                     self.set_state(false);
                     // Race transcription against a new RecordStart (cancel & restart).
+                    // `biased` : la transcription est sondée d'abord, sinon un canal déjà fermé pouvait l'annuler avant qu'elle démarre.
                     tokio::select! {
+                        biased;
                         _ = self.handle_record_stop() => {}
                         next = erx.recv() => {
                             if let Some(HotkeyEvent::RecordStart) = next {
-                                self.recorder.start()?;
-                                recording = true;
-                                self.set_state(true);
-                                self.notifier.notify(t("🎤 Recording…", "🎤 Enregistrement…", self.ui_lang));
+                                recording = self.begin_recording();
                             }
                         }
                     }
@@ -106,6 +140,25 @@ where
             }
         }
         Ok(())
+    }
+
+    /// Démarre l'enregistrement. Une panne de micro (casque débranché, micro occupé) ne doit pas arrêter le démon : on prévient et on attend la touche suivante.
+    fn begin_recording(&mut self) -> bool {
+        match self.recorder.start() {
+            Ok(()) => {
+                tracing::info!("recording…");
+                self.stt.warm();
+                self.set_state(true);
+                self.notifier.notify(t("🎤 Recording…", "🎤 Enregistrement…", self.ui_lang));
+                true
+            }
+            Err(e) => {
+                tracing::error!("cannot start recording: {e:#}");
+                let msg = format!("{} {}", t("✗ Microphone unavailable:", "✗ Micro indisponible :", self.ui_lang), short_reason(&e));
+                self.notifier.notify(&msg);
+                false
+            }
+        }
     }
 
     async fn handle_record_stop(&mut self) {
@@ -135,8 +188,13 @@ where
 
         let raw = match self.stt.transcribe(&audio).await {
             Ok(t) if !t.text.is_empty() => t.text,
-            Ok(_) => { tracing::warn!("empty transcription"); self.notifier.notify(t("✗ Empty", "✗ Vide", self.ui_lang)); return; }
-            Err(e) => { tracing::error!("STT error: {e}"); self.notifier.notify(t("✗ STT error", "✗ Erreur STT", self.ui_lang)); return; }
+            Ok(_) => { tracing::warn!("empty transcription"); self.notifier.notify(t("✗ Nothing heard — speak closer to the mic", "✗ Rien entendu — parlez plus près du micro", self.ui_lang)); return; }
+            Err(e) => {
+                tracing::error!("STT error: {e:#}");
+                let msg = format!("{} {}", t("✗ Speech recognition failed:", "✗ Échec de la reconnaissance vocale :", self.ui_lang), short_reason(&e));
+                self.notifier.notify(&msg);
+                return;
+            }
         };
 
         // Vocab learning and LLM processing are independent — run them in parallel.
@@ -157,20 +215,11 @@ where
         });
 
         let ctx = self.context_reader.as_ref().and_then(|cr| cr.get_context());
-        let processor_input: std::borrow::Cow<str> = match &ctx {
-            Some(c) if self.processor.is_some() => std::borrow::Cow::Owned(format!(
-                "[Context before cursor — use for tone, do NOT include in output]:\n{c}\n\n[Dictated text to correct]:\n{raw}"
-            )),
-            _ => std::borrow::Cow::Borrowed(&raw),
-        };
-
         let text = match &self.processor {
-            Some(p) => match p.process(&processor_input).await {
-                Ok(t) => t,
-                Err(e) => { tracing::warn!("processor error: {e}"); raw.clone() }
-            },
+            Some(p) => self.run_processor(p.as_ref(), &raw, ctx.as_deref()).await,
             None => raw.clone(),
         };
+        let text = snippets::expand(&text, &self.snippets);
 
         if let Some(h) = &mut self.history {
             if let Err(e) = h.save(&raw, &text, audio.duration().as_millis() as u64) {
@@ -189,6 +238,26 @@ where
         if let Some(task) = vocab_task { let _ = task.await; }
 
         self.notifier.notify(t("✓ Done", "✓ Fait", self.ui_lang));
+    }
+
+    /// Corrige par morceaux (un petit LLM saute des passages sur les longs textes) et garde le texte brut d'un morceau si la correction perd du contenu.
+    async fn run_processor(&self, p: &dyn TextProcessor, raw: &str, ctx: Option<&str>) -> String {
+        let chunks = if self.content_guard { split_chunks(raw) } else { vec![raw.trim()] };
+        let mut out = Vec::with_capacity(chunks.len());
+        for (i, chunk) in chunks.into_iter().enumerate() {
+            let input = match ctx {
+                Some(c) if i == 0 => format!(
+                    "[Context before cursor — use for tone, do NOT include in output]:\n{c}\n\n[Dictated text to correct]:\n{chunk}"
+                ),
+                _ => chunk.to_string(),
+            };
+            match p.process(&input).await {
+                Ok(t) if !(self.content_guard && lost_content(chunk, &t)) => out.push(t),
+                Ok(_) => { tracing::warn!("processor dropped content, keeping raw chunk"); out.push(chunk.to_string()); }
+                Err(e) => { tracing::warn!("processor error: {e}"); out.push(chunk.to_string()); }
+            }
+        }
+        out.join(" ")
     }
 
     fn do_inject(&self, text: &str) {
@@ -245,10 +314,11 @@ mod tests {
 
     fn make_service(
         rec: MockAudioRecorder,
-        stt: MockSpeechToText,
+        mut stt: MockSpeechToText,
         inj: MockTextInjector,
         notifier: MockNotifier,
     ) -> DictationService<MockAudioRecorder, MockSpeechToText, MockTextInjector> {
+        stt.expect_warm().return_const(());
         DictationService::new(rec, stt, inj, None, Box::new(notifier))
     }
 
@@ -271,6 +341,7 @@ mod tests {
         rec.expect_stop().returning(|| Ok(samples(1.0)));
 
         let mut stt = MockSpeechToText::new();
+        stt.expect_warm().return_const(());
         stt.expect_transcribe()
             .returning(|_| Ok(Transcription { text: "hello world".into() }));
 
@@ -287,12 +358,94 @@ mod tests {
     }
 
     #[test]
+    fn microphone_failure_notifies_and_the_next_press_still_works() {
+        let mut rec = MockAudioRecorder::new();
+        rec.expect_start().times(1).returning(|| Err(anyhow::anyhow!("no microphone found")));
+        rec.expect_start().times(1).returning(|| Ok(()));
+        rec.expect_stop().times(1).returning(|| Ok(samples(1.0)));
+        let mut stt = MockSpeechToText::new();
+        stt.expect_warm().return_const(());
+        stt.expect_transcribe().times(1).returning(|_| Ok(Transcription { text: "hello".into() }));
+        let mut inj = MockTextInjector::new();
+        inj.expect_inject().with(eq("hello")).times(1).returning(|_| Ok(()));
+        let mut notifier = MockNotifier::new();
+        notifier.expect_notify().withf(|m| m.contains("Microphone unavailable") && m.contains("no microphone found")).times(1).return_const(());
+        notifier.expect_notify().return_const(());
+        let mut svc = DictationService::new(rec, stt, inj, None, Box::new(notifier));
+        run(&mut svc, vec![HotkeyEvent::RecordStart, HotkeyEvent::RecordStart, HotkeyEvent::RecordStop]);
+    }
+
+    #[test]
+    fn stt_failure_tells_the_user_why() {
+        let mut rec = MockAudioRecorder::new();
+        rec.expect_start().returning(|| Ok(()));
+        rec.expect_stop().returning(|| Ok(samples(1.0)));
+        let mut stt = MockSpeechToText::new();
+        stt.expect_warm().return_const(());
+        stt.expect_transcribe().returning(|_| Err(anyhow::anyhow!("whisper model not loaded")));
+        let mut inj = MockTextInjector::new();
+        inj.expect_inject().never();
+        let mut notifier = MockNotifier::new();
+        notifier.expect_notify().withf(|m| m.contains("recognition failed") && m.contains("whisper model not loaded")).times(1).return_const(());
+        notifier.expect_notify().return_const(());
+        let mut svc = DictationService::new(rec, stt, inj, None, Box::new(notifier));
+        run(&mut svc, vec![HotkeyEvent::RecordStart, HotkeyEvent::RecordStop]);
+    }
+
+    #[test]
+    fn short_reason_is_one_bounded_line() {
+        let e = anyhow::anyhow!("root cause").context("while doing X");
+        assert_eq!(short_reason(&e), "while doing X: root cause");
+        let long = anyhow::anyhow!("é".repeat(200));
+        assert_eq!(short_reason(&long).chars().count(), 91);
+    }
+
+    #[test]
+    fn split_chunks_keeps_every_word() {
+        let t = "Une phrase assez longue pour remplir. ".repeat(40);
+        let chunks = split_chunks(&t);
+        assert!(chunks.len() > 1);
+        assert_eq!(chunks.join(" ").split_whitespace().count(), t.split_whitespace().count());
+        assert_eq!(split_chunks("court."), vec!["court."]);
+        assert_eq!(split_chunks(""), vec![""]);
+    }
+
+    #[test]
+    fn lost_content_ignores_short_texts_and_flags_big_drops() {
+        assert!(!lost_content("euh je veux ça", "je veux ça"));
+        let long = "mot ".repeat(30);
+        assert!(lost_content(&long, &"mot ".repeat(20)));
+        assert!(lost_content(&long, &"mot ".repeat(26)));
+        assert!(!lost_content(&long, &"mot ".repeat(28)));
+    }
+
+    #[test]
+    fn processor_that_drops_content_falls_back_to_raw() {
+        let raw = "un deux trois quatre cinq six sept huit neuf dix onze douze treize quatorze";
+        let mut rec = MockAudioRecorder::new();
+        rec.expect_start().returning(|| Ok(()));
+        rec.expect_stop().returning(|| Ok(samples(1.0)));
+        let mut stt = MockSpeechToText::new();
+        stt.expect_warm().return_const(());
+        stt.expect_transcribe().returning(move |_| Ok(Transcription { text: raw.into() }));
+        let mut proc = MockTextProcessor::new();
+        proc.expect_process().returning(|_| Ok("Un deux.".into()));
+        let mut inj = MockTextInjector::new();
+        inj.expect_inject().with(eq(raw)).returning(|_| Ok(()));
+        let mut notifier = MockNotifier::new();
+        notifier.expect_notify().returning(|_| ());
+        let mut svc = DictationService::new(rec, stt, inj, Some(Box::new(proc)), Box::new(notifier));
+        run(&mut svc, vec![HotkeyEvent::RecordStart, HotkeyEvent::RecordStop]);
+    }
+
+    #[test]
     fn processor_cleans_text_before_inject() {
         let mut rec = MockAudioRecorder::new();
         rec.expect_start().returning(|| Ok(()));
         rec.expect_stop().returning(|| Ok(samples(1.0)));
 
         let mut stt = MockSpeechToText::new();
+        stt.expect_warm().return_const(());
         stt.expect_transcribe()
             .returning(|_| Ok(Transcription { text: "raw text".into() }));
 
@@ -342,6 +495,7 @@ mod tests {
         rec.expect_stop().returning(|| Ok(samples(1.0)));
 
         let mut stt = MockSpeechToText::new();
+        stt.expect_warm().return_const(());
         stt.expect_transcribe()
             .returning(|_| Err(anyhow::anyhow!("STT failed")));
 
@@ -362,6 +516,7 @@ mod tests {
         rec.expect_stop().returning(|| Ok(samples(1.0)));
 
         let mut stt = MockSpeechToText::new();
+        stt.expect_warm().return_const(());
         stt.expect_transcribe()
             .returning(|_| Ok(Transcription { text: "raw".into() }));
 
@@ -388,6 +543,7 @@ mod tests {
         rec.expect_stop().returning(|| Ok(silent_samples(1.0)));
 
         let mut stt = MockSpeechToText::new();
+        stt.expect_warm().return_const(());
         stt.expect_transcribe().never(); // must NOT be called
 
         let mut inj = MockTextInjector::new();
@@ -407,6 +563,7 @@ mod tests {
         rec.expect_stop().returning(|| Ok(samples(1.0)));
 
         let mut stt = MockSpeechToText::new();
+        stt.expect_warm().return_const(());
         stt.expect_transcribe()
             .returning(|_| Ok(Transcription { text: "note this".into() }));
 

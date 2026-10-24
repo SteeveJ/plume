@@ -29,7 +29,6 @@ ksni = "0.2"
 llama-cpp-2 = { version = "0.1" }
 rusqlite = "0.31"
 hound = "3"
-tempfile = "3"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 sha2 = "0.10"
@@ -39,10 +38,25 @@ atspi = { version = "0.21", default-features = false, features = ["tokio"] }
 futures-util = "0.3"
 gtk4 = "0.9"
 png = "0.17"
+whisper-rs = "0.16"
+opus = { version = "0.3", optional = true }
+ogg = { version = "0.9", optional = true }
+libc = "0.2"
 
 [features]
-cuda = ["llama-cpp-2/cuda"]
-vulkan = ["llama-cpp-2/vulkan"]
+cuda = ["llama-cpp-2/cuda", "whisper-rs/cuda"]
+vulkan = ["llama-cpp-2/vulkan", "whisper-rs/vulkan"]
+default = ["opus"]
+opus = ["dep:opus", "dep:ogg"]
 
 [dev-dependencies]
 mockall = "0.13"
+
+[profile.release]
+strip = true
+lto = "fat"
+codegen-units = 1
+
+# whisper.cpp et llama.cpp embarquent chacun leur ggml : la copie vendorisée préfixe les symboles de celui de whisper (voir son build.rs) pour les lier dans un seul binaire.
+[patch.crates-io]
+whisper-rs-sys = { path = "vendor/whisper-rs-sys" }

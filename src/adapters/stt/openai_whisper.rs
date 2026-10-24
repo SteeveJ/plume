@@ -1,8 +1,6 @@
 use async_trait::async_trait;
 use anyhow::{Context, Result};
-use hound::{WavWriter, WavSpec, SampleFormat};
 use reqwest::Client;
-use std::io::Cursor;
 use crate::domain::model::{AudioSamples, Transcription};
 use crate::domain::ports::stt::SpeechToText;
 use super::shared_vocab::SharedVocab;
@@ -18,7 +16,7 @@ pub struct OpenAiWhisper {
 impl OpenAiWhisper {
     pub fn new(api_key: impl Into<String>, lang: impl Into<String>, prompt: SharedVocab) -> Self {
         Self {
-            client: Client::new(),
+            client: crate::adapters::http::client(std::time::Duration::from_secs(60)),
             api_key: api_key.into(),
             model: "whisper-1".to_string(),
             lang: lang.into(),
@@ -26,34 +24,24 @@ impl OpenAiWhisper {
         }
     }
 
-    fn encode_wav(&self, audio: &AudioSamples) -> Result<Vec<u8>> {
-        let spec = WavSpec {
-            channels: 1,
-            sample_rate: audio.sample_rate,
-            bits_per_sample: 16,
-            sample_format: SampleFormat::Int,
-        };
-        let mut buf = Cursor::new(Vec::new());
-        let mut writer = WavWriter::new(&mut buf, spec)?;
-        // mix down to mono
-        let step = audio.channels as usize;
-        for chunk in audio.samples.chunks(step) {
-            let mono = chunk.iter().sum::<f32>() / step as f32;
-            writer.write_sample((mono.clamp(-1.0, 1.0) * 32767.0) as i16)?;
+    fn encode_audio(&self, audio: &AudioSamples) -> Result<(Vec<u8>, &'static str, &'static str)> {
+        #[cfg(feature = "opus")]
+        match super::opus_enc::encode_ogg_opus(audio) {
+            Ok(b) => return Ok((b, "audio.ogg", "audio/ogg")),
+            Err(e) => tracing::warn!("opus encode failed, fallback WAV: {e:#}"),
         }
-        writer.finalize()?;
-        Ok(buf.into_inner())
+        Ok((super::audio_util::encode_wav_16k(audio).context("encode wav")?, "audio.wav", "audio/wav"))
     }
 }
 
 #[async_trait]
 impl SpeechToText for OpenAiWhisper {
     async fn transcribe(&self, audio: &AudioSamples) -> Result<Transcription> {
-        let wav = self.encode_wav(audio).context("encode wav")?;
+        let (bytes, name, mime) = self.encode_audio(audio)?;
 
-        let part = reqwest::multipart::Part::bytes(wav)
-            .file_name("audio.wav")
-            .mime_str("audio/wav")?;
+        let part = reqwest::multipart::Part::bytes(bytes)
+            .file_name(name)
+            .mime_str(mime)?;
         let mut form = reqwest::multipart::Form::new()
             .part("file", part)
             .text("model", self.model.clone())
