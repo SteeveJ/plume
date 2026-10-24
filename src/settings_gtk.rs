@@ -164,6 +164,9 @@ pub fn run_settings_window(cfg: AppConfig) {
 
         let style_cb = ComboBoxText::new();
         style_cb.append(Some("clean"),        t("🔓 Clean — fix errors only", "🔓 Correction — erreurs uniquement"));
+        style_cb.append(Some("casual"),       t("🔒 Casual / Friendly (needs API key)", "🔒 Décontracté / Amical (nécessite une clé API)"));
+        style_cb.append(Some("excited"),      t("🔒 Excited / Upbeat (needs API key)", "🔒 Enthousiaste (nécessite une clé API)"));
+        style_cb.append(Some("formal"),       t("🔒 Formal email (needs API key)", "🔒 Formel, courriel (nécessite une clé API)"));
         style_cb.append(Some("professional"), t("🔒 Professional tone (needs API key)", "🔒 Professionnel (nécessite une clé API)"));
         style_cb.append(Some("diplomatic"),   t("🔒 Diplomatic / Soften (needs API key)", "🔒 Diplomatique / Adouci (nécessite une clé API)"));
         style_cb.append(Some("assertive"),    t("🔒 Assertive (needs API key)", "🔒 Assertif (nécessite une clé API)"));

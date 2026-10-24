@@ -132,7 +132,7 @@ pub fn conf_warnings(contents: &str) -> Vec<String> {
         ("PROCESSOR", &["local", "ollama", "openai", "anthropic", "none"]),
         ("OUTPUT", &["inject", "scratchpad", "both"]),
         ("APP_LANG", &["en", "fr"]),
-        ("PROCESSOR_STYLE", &["", "clean", "soften", "diplomatic", "professional", "assertive", "humor"]),
+        ("PROCESSOR_STYLE", STYLES),
     ];
     let mut out = Vec::new();
     for (i, raw) in contents.lines().enumerate() {
@@ -190,8 +190,19 @@ majuscules aux noms propres et en début de phrase ; \
 apostrophe typographique (') et non droite (') ; \
 trait d'union dans les nombres composés (vingt-deux, quatre-vingts) et les mots composés.";
 
+/// Styles de réécriture (le vide = correction seule). `clean` corrige sans reformuler ; les autres reformulent et demandent un LLM en ligne.
+pub const STYLES: &[&str] = &[
+    "", "clean", "casual", "excited", "formal", "professional", "diplomatic", "soften", "assertive", "humor",
+];
+
 pub fn style_prompt(style: &str, lang: &str) -> String {
     let base = match style {
+        "casual" =>
+            "Reformulate this message in a casual, friendly tone, as if writing to a colleague you know well. Keep the original meaning. Return ONLY the reformulated text.",
+        "excited" =>
+            "Reformulate this message in an enthusiastic, upbeat tone. Keep the original meaning and use exclamation marks sparingly. Return ONLY the reformulated text.",
+        "formal" =>
+            "Reformulate this message in a formal, polite tone suitable for an email to someone you do not know. Use complete sentences and avoid slang and contractions. Keep the original meaning. Return ONLY the reformulated text.",
         "soften" | "diplomatic" =>
             "Reformulate this message in a softer, diplomatic tone. Keep the original meaning but remove any harsh or aggressive language. Return ONLY the reformulated text.",
         "professional" =>
@@ -378,6 +389,21 @@ mod tests {
         let w = conf_warnings("PROCESSOR=olama\nMODE=toogle\nHOTKEY=KEY_NOPE\nFOO=1\nbad line\nSTT_MODEL=small q8\n");
         assert_eq!(w.len(), 6, "{w:?}");
         assert!(w[0].contains("PROCESSOR=olama"));
+    }
+
+    #[test]
+    fn every_style_has_its_own_prompt_and_unknown_falls_back_to_clean() {
+        let clean = style_prompt("clean", "en");
+        assert_eq!(style_prompt("", "en"), clean);
+        assert_eq!(style_prompt("does-not-exist", "en"), clean);
+        let rewriting: Vec<&&str> = STYLES.iter().filter(|s| !matches!(**s, "" | "clean")).collect();
+        let mut prompts: Vec<String> = rewriting.iter().map(|s| style_prompt(s, "en")).collect();
+        assert!(prompts.iter().all(|p| *p != clean && p.contains("Return ONLY")), "{rewriting:?}");
+        prompts.sort();
+        prompts.dedup();
+        // "soften" et "diplomatic" partagent volontairement le même prompt.
+        assert_eq!(prompts.len(), rewriting.len() - 1);
+        assert!(style_prompt("casual", "fr").contains("français"));
     }
 
     #[test]

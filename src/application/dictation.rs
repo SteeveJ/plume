@@ -20,6 +20,7 @@ use crate::domain::ports::{
     stt::SpeechToText,
 };
 use crate::adapters::stt::SharedVocab;
+use super::hallucination;
 use super::snippets::{self, Snippet};
 
 const CHUNK_CHARS: usize = 350;
@@ -173,13 +174,11 @@ where
             return;
         }
 
-        // Reject silent/disconnected mic: RMS below 0.01 means no real speech.
-        let rms = {
-            let sum: f32 = audio.samples.iter().map(|s| s * s).sum();
-            (sum / audio.samples.len().max(1) as f32).sqrt()
-        };
+        // Micro coupé ou débranché : RMS quasi nul. Sans ce garde-fou Whisper invente du texte sur le silence.
+        let rms = hallucination::rms(&audio.samples);
         if rms < 0.005 {
             tracing::warn!("audio too quiet (rms={rms:.4}), skipping — mic disconnected?");
+            self.notifier.notify(t("✗ No sound — is the microphone muted?", "✗ Aucun son — le micro est-il coupé ?", self.ui_lang));
             return;
         }
 
@@ -187,8 +186,12 @@ where
         tracing::info!("transcribing ({:.1}s)…", audio.duration().as_secs_f64());
 
         let raw = match self.stt.transcribe(&audio).await {
-            Ok(t) if !t.text.is_empty() => t.text,
-            Ok(_) => { tracing::warn!("empty transcription"); self.notifier.notify(t("✗ Nothing heard — speak closer to the mic", "✗ Rien entendu — parlez plus près du micro", self.ui_lang)); return; }
+            Ok(heard) if !heard.text.is_empty() && !hallucination::is_hallucination(&heard.text, rms) => heard.text,
+            Ok(heard) => {
+                tracing::warn!("nothing usable heard (rms={rms:.4}, whisper said {:?})", heard.text);
+                self.notifier.notify(t("✗ Nothing heard — speak closer to the mic", "✗ Rien entendu — parlez plus près du micro", self.ui_lang));
+                return;
+            }
             Err(e) => {
                 tracing::error!("STT error: {e:#}");
                 let msg = format!("{} {}", t("✗ Speech recognition failed:", "✗ Échec de la reconnaissance vocale :", self.ui_lang), short_reason(&e));
@@ -408,6 +411,15 @@ mod tests {
         assert_eq!(chunks.join(" ").split_whitespace().count(), t.split_whitespace().count());
         assert_eq!(split_chunks("court."), vec!["court."]);
         assert_eq!(split_chunks(""), vec![""]);
+    }
+
+    #[test]
+    fn split_chunks_never_cuts_inside_an_accented_letter() {
+        let t = "Élève très pressé, il a été à côté du château. ".repeat(40);
+        let chunks = split_chunks(&t);
+        assert!(chunks.len() > 1);
+        assert!(chunks.iter().all(|c| c.ends_with('.')), "chaque morceau finit une phrase : {chunks:?}");
+        assert_eq!(chunks.join(" ").split_whitespace().count(), t.split_whitespace().count());
     }
 
     #[test]

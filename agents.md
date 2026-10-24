@@ -134,5 +134,16 @@ OLLAMA_MODEL=qwen3:0.6b
 - Tout fichier qui contient des clés ou du texte dicté est créé en 0600 (`config::write_private`) ; le dossier de données en 0700.
 - Avant de charger un modèle : `sysmem::model_fits` (RAM) ; avant de le télécharger : espace disque. Facteur mesuré pour Whisper `small` : RAM ≈ 1,9 × taille du fichier.
 - Le calcul lourd (Whisper, LLM) passe par `spawn_blocking` ; jamais `block_in_place` dans la boucle de dictée.
-- Tests : `cargo test --lib` (rapide, sans modèle). Test avec un vrai modèle : `PLUME_TEST_GGML=/chemin/ggml-tiny.bin cargo test --release --lib -- --ignored`.
+- Tests, du plus rapide au plus complet :
+  - `cargo test --lib` : unitaires, sans modèle ni matériel.
+  - `cargo test --test config_load --test pipeline --test hallucinations` : non-régression avec les vrais adaptateurs (fichier de config réel dans un HOME temporaire ; chaîne parole → LLM → snippets → historique → clavier avec faux micro/clavier). Chaque test correspond à un bug réel déjà rencontré.
+  - `PLUME_TEST_GGML=… PLUME_TEST_GGUF=… cargo test --release --test e2e_models -- --ignored` (+ `--features cuda`) : vrais modèles, Whisper et Qwen dans le même processus. Seul test qui attrape un conflit de symboles ggml à l'exécution.
+  - `PLUME_TEST_GGML=… cargo test --release --lib -- --ignored` : libération de la RAM au déchargement de Whisper.
 - `plume --restart` arrête l'ancien démon puis relance le programme courant (utilisé par le tray et les réglages).
+- Hallucinations : toute phrase que Whisper invente sur du bruit doit être ajoutée à `INVENTED` (`application/hallucination.rs`) avec le cas correspondant dans `tests/hallucinations.rs`. Le test `e2e_models` rejoue du bruit réel et montre les nouvelles phrases après un changement de modèle.
+
+## Documentation
+- Utilisateur et développeur : `README.md` (EN), `README.fr.md` (FR), `docs/en/` et `docs/fr/` (configuration, architecture, développement, dépannage).
+- Décisions d'architecture : `docs/fr/adr/` et `docs/en/adr/` (13 ADR dans chaque langue, même numéro, liens croisés ; index dans chaque dossier et dans `docs/README.md`). Toute décision qui change l'architecture, le build ou le comportement du LLM/Whisper s'écrit en ADR ; ne jamais réécrire un ADR accepté, en ajouter un qui le remplace.
+- Chaque chiffre de la doc vient d'une mesure faite sur la RTX 5080 de développement ; les refaire si le matériel ou les modèles changent.
+- Tests de compréhension du français : `tests/e2e_french.rs` + `tests/fixtures/fr/*.wav` (voix Piper `fr_FR-siwis-medium`, textes de référence dans `tests/common/mod.rs`).
