@@ -44,6 +44,7 @@ Plume refuse un modèle qui ne tient pas dans la RAM libre et indique lequel cho
 | Fichier | Contenu |
 |---------|---------|
 | `ggml-*.bin` | Modèle(s) Whisper, téléchargés à la demande |
+| `ggml-silero-v5.1.2.bin` | Détecteur de voix (885 Ko), téléchargé avec le premier modèle Whisper |
 | `model.gguf` | LLM local |
 | `vocab.txt` | Mots donnés à Whisper. Les lignes commençant par `#` sont des commentaires. Noms et sigles s'ajoutent automatiquement |
 | `snippets.txt` | Une règle par ligne : `phrase dite => texte`. `\n` fait un saut de ligne. La recherche ignore la casse (majuscules accentuées comprises), ne trouve que des mots entiers, phrase la plus longue d'abord. Appliqué après le LLM. Lu au démarrage |

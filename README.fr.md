@@ -8,7 +8,7 @@ Un démon de dictée vocale pour Linux. Maintenez (ou basculez) un raccourci cla
 
 - **Reconnaissance vocale avec whisper.cpp**, dans le processus, sur GPU (CUDA, Vulkan) ou CPU. La langue est détectée automatiquement ou fixée avec `STT_LANG`.
 - **Correction par un LLM local** — Qwen3 0,6B via llama.cpp corrige la ponctuation, les majuscules et les erreurs évidentes de transcription sans changer vos mots.
-- **Protection contre le texte inventé** — le silence et le bruit n'atteignent jamais votre document (contrôle du volume, balises « non-parole » de Whisper, hallucinations connues comme « Thank you. »).
+- **Protection contre le texte inventé** — un détecteur de voix (Silero) tient le silence et le bruit loin de Whisper, avec en renfort un contrôle du volume, les balises « non-parole » de Whisper et une liste d'hallucinations connues comme « Thank you. ».
 - **Snippets** — dites une phrase, obtenez un texte (`~/.local/share/plume/snippets.txt`).
 - **Vocabulaire vivant** — noms et sigles sont appris dans `vocab.txt` et renvoyés à Whisper.
 - **Sobre en mémoire** — Whisper est déchargé après 5 minutes d'inactivité et rechargé pendant que vous commencez à parler.
@@ -72,10 +72,10 @@ Les guides complets sont dans [`docs/`](docs/README.md) : [configuration](docs/f
 
 ## Limites connues
 
-- Le LLM de 0,6B corrige environ quatre phrases sur six ; sur un texte long il peut ne pas répondre et Plume garde alors votre texte brut. Un modèle plus grand est dans la liste de tâches.
-- Une voix très basse (sous le seuil de bruit) qui dit exactement « merci » ou « thank you » est traitée comme du bruit.
+- Le LLM de 0,6B corrige environ quatre phrases sur six ; sur un texte long il peut ne pas répondre et Plume garde alors votre texte brut. Un modèle plus grand (Qwen3-1.7B) a été essayé et n'est pas meilleur avec les réglages actuels (voir l'ADR 0004).
+- La protection contre le bruit repose sur un détecteur de voix testé seulement sur du bruit de synthèse (blanc, bourdonnement, claquements) ; une télé ou une voix lointaine peut être prise pour de la parole.
 - Seul CUDA a été testé sur GPU ; le build Vulkan n'est pas testé.
-- Les surcouches toujours au premier plan ne sont pas disponibles sur GNOME Wayland sans extension du compositeur.
+- Il n'y a ni overlay flottant, ni bulle d'état, ni fenêtre « hub » : GNOME Wayland ne peut pas garder une fenêtre au premier plan sans extension, le retour passe donc par l'icône de la barre et les notifications (ADR 0015).
 
 ## Compatibilité distributions
 

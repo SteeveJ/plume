@@ -27,3 +27,5 @@ Available in both languages · Disponibles dans les deux langues : [English](en/
 | 0011 | [Optional GPU builds, static linking, Opus by default](en/adr/0011-gpu-builds-and-static-linking.md) | [Builds GPU facultatifs, liaison statique, Opus par défaut](fr/adr/0011-build-gpu-et-liaison-statique.md) |
 | 0012 | [Restart without a shell with `plume --restart`](en/adr/0012-restart-without-a-shell.md) | [Redémarrer sans shell avec `plume --restart`](fr/adr/0012-redemarrage-sans-shell.md) |
 | 0013 | [Four test levels, real models and real bugs](en/adr/0013-test-strategy.md) | [Quatre niveaux de tests, vrais modèles et vrais bugs](fr/adr/0013-strategie-de-tests.md) |
+| 0014 | [Silero voice detector in front of Whisper](en/adr/0014-silero-voice-detector.md) | [Détecteur de voix Silero avant Whisper](fr/adr/0014-detecteur-de-voix-silero.md) |
+| 0015 | [No floating overlay, status bubble or "hub" window](en/adr/0015-no-floating-overlay.md) | [Pas d'overlay flottant, de bulle d'état ni de fenêtre « hub »](fr/adr/0015-pas-d-overlay-flottant.md) |

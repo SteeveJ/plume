@@ -44,6 +44,7 @@ Plume refuses a model that cannot fit in free RAM and tells you which one to pic
 | File | Content |
 |------|---------|
 | `ggml-*.bin` | Whisper model(s), downloaded on demand |
+| `ggml-silero-v5.1.2.bin` | Voice detector (885 KB), downloaded with the first Whisper model |
 | `model.gguf` | Local LLM |
 | `vocab.txt` | Words fed to Whisper. Lines starting with `#` are comments. Names and acronyms are appended automatically |
 | `snippets.txt` | One rule per line: `spoken phrase => text`. `\n` is a line break. Matching ignores case (accented capitals included), whole words only, longest phrase first. Applied after the LLM. Read at startup |

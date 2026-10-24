@@ -19,3 +19,5 @@ Each record gives the context, the decision and its consequences. A record is ne
 | [0011](0011-gpu-builds-and-static-linking.md) | Optional GPU builds, static linking, Opus by default |
 | [0012](0012-restart-without-a-shell.md) | Restart without a shell with `plume --restart` |
 | [0013](0013-test-strategy.md) | Four test levels, real models and real bugs |
+| [0014](0014-silero-voice-detector.md) | Silero voice detector in front of Whisper |
+| [0015](0015-no-floating-overlay.md) | No floating overlay, status bubble or "hub" window |

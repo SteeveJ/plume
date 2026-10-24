@@ -20,6 +20,6 @@ Le module `application/hallucination.rs` décide :
 ## Conséquences
 
 - Les mêmes mots dits à voix normale passent (« Merci. », « Thank you. »).
-- Limite : une voix très basse qui dit exactement « merci » est écartée. Un détecteur de voix (Silero) l'éviterait, c'est dans la liste de tâches.
+- Limite : une voix très basse qui dit exactement « merci » est écartée. **Levée par l'ADR 0014** (détecteur de voix Silero) quand le détecteur est présent.
 - La liste est à maintenir : `tests/e2e_models.rs` rejoue du bruit réel et affiche toute nouvelle phrase après un changement de modèle.
 - Les accents et majuscules sont gérés (« Merci À Tous »), vérifié par un test.

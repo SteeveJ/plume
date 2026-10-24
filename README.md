@@ -8,7 +8,7 @@ A voice dictation daemon for Linux. Hold (or toggle) a hotkey and speak; Plume t
 
 - **Speech-to-text with whisper.cpp**, in-process, on GPU (CUDA, Vulkan) or CPU. Language is detected automatically or fixed with `STT_LANG`.
 - **Local LLM correction** — Qwen3 0.6B through llama.cpp fixes punctuation, capitalisation and obvious transcription errors without changing your words.
-- **Protection against invented text** — silence and noise never reach your document (volume check, Whisper's non-speech tags, known hallucinations such as "Thank you.").
+- **Protection against invented text** — a voice detector (Silero) keeps silence and noise away from Whisper, backed by a volume check, Whisper's non-speech tags and a list of known hallucinations such as "Thank you.".
 - **Snippets** — say a phrase, get a text (`~/.local/share/plume/snippets.txt`).
 - **Live vocabulary** — names and acronyms are learned into `vocab.txt` and fed back to Whisper.
 - **Light on memory** — Whisper is unloaded after 5 idle minutes and reloaded while you start speaking.
@@ -72,10 +72,10 @@ Full guides are in [`docs/`](docs/README.md): [configuration](docs/en/configurat
 
 ## Known limitations
 
-- The 0.6B LLM corrects roughly four sentences out of six; on a long text it can fail to answer and Plume keeps your raw text. A larger model is on the to-do list.
-- A very quiet voice (below the noise threshold) saying exactly "thank you" or "merci" is treated as noise.
+- The 0.6B LLM corrects roughly four sentences out of six; on a long text it can fail to answer and Plume keeps your raw text. A larger model (Qwen3-1.7B) was tried and is not better with the current settings (see ADR 0004).
+- Noise protection relies on a voice detector tested only on synthetic noise (white noise, hum, key clicks); a TV or distant voice may be taken for speech.
 - Only CUDA has been tested on GPU; the Vulkan build is untested.
-- Always-on-top overlays are not available on GNOME Wayland without a compositor extension.
+- There is no floating overlay, status bubble or hub window: GNOME Wayland cannot keep a window on top without an extension, so feedback goes through the tray icon and notifications (ADR 0015).
 
 ## Distro compatibility
 

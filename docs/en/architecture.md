@@ -9,7 +9,7 @@ src/
   adapters/
     audio/             CpalRecorder          microphone, re-read at every recording
     hotkey/            EvdevListener         keyboards rescanned every 3 s
-    stt/               WhisperCpp, OpenAiWhisper, audio_util, opus_enc
+    stt/               WhisperCpp (+ Silero voice detector), OpenAiWhisper, audio_util, opus_enc
     processor/         LocalProcessor (llama.cpp), Ollama, OpenAi, Anthropic
     injector/          ClipboardInjector     clipboard + uinput Ctrl+V
     context/           AtspiContext          text before the cursor, via accessibility
@@ -24,7 +24,7 @@ src/
 
 1. The hotkey thread sends `RecordStart`. The service starts the recorder, tells Whisper to load if it was unloaded (`warm`), and notifies.
 2. On `RecordStop` the audio is stopped and checked: too short → ignored; volume almost zero → "No sound — is the microphone muted?" and Whisper is not called.
-3. Whisper (`spawn_blocking`) returns text. Non-speech tags (`[BLANK_AUDIO]`) are dropped. Punctuation-only text and phrases Whisper invents on noise are ignored ([ADR 0008](adr/0008-hallucination-filter.md)).
+3. A voice detector (Silero, [ADR 0014](adr/0014-silero-voice-detector.md)) looks for speech first: none → Whisper is not called; otherwise only the spoken zone is sent. Whisper (`spawn_blocking`) returns text. Non-speech tags (`[BLANK_AUDIO]`) are dropped. Punctuation-only text and phrases Whisper invents on noise are ignored ([ADR 0008](adr/0008-hallucination-filter.md)).
 4. The text is corrected in chunks of about 350 characters by the processor. A chunk that comes back empty or more than 10 % shorter keeps the raw words ([ADR 0005](adr/0005-chunked-correction.md)).
 5. Snippets are expanded, the result is saved to history, then typed (or written to the scratchpad).
 6. Names and acronyms found in the text are appended to `vocab.txt`.

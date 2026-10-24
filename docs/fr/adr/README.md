@@ -19,3 +19,5 @@ Chaque fiche donne le contexte, la décision et ses conséquences. Une fiche acc
 | [0011](0011-build-gpu-et-liaison-statique.md) | Builds GPU facultatifs, liaison statique, Opus par défaut |
 | [0012](0012-redemarrage-sans-shell.md) | Redémarrer sans shell avec `plume --restart` |
 | [0013](0013-strategie-de-tests.md) | Quatre niveaux de tests, vrais modèles et vrais bugs |
+| [0014](0014-detecteur-de-voix-silero.md) | Détecteur de voix Silero avant Whisper |
+| [0015](0015-pas-d-overlay-flottant.md) | Pas d'overlay flottant, de bulle d'état ni de fenêtre « hub » |

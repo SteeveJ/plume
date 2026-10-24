@@ -9,7 +9,7 @@ src/
   adapters/
     audio/             CpalRecorder          micro, relu à chaque enregistrement
     hotkey/            EvdevListener         claviers ré-énumérés toutes les 3 s
-    stt/               WhisperCpp, OpenAiWhisper, audio_util, opus_enc
+    stt/               WhisperCpp (+ détecteur de voix Silero), OpenAiWhisper, audio_util, opus_enc
     processor/         LocalProcessor (llama.cpp), Ollama, OpenAi, Anthropic
     injector/          ClipboardInjector     presse-papiers + Ctrl+V via uinput
     context/           AtspiContext          texte avant le curseur, via l'accessibilité
@@ -24,7 +24,7 @@ src/
 
 1. Le thread du clavier envoie `RecordStart`. Le service démarre l'enregistreur, demande à Whisper de se charger s'il était déchargé (`warm`), et notifie.
 2. À `RecordStop` l'audio est arrêté puis contrôlé : trop court → ignoré ; volume presque nul → « Aucun son — le micro est-il coupé ? » et Whisper n'est pas appelé.
-3. Whisper (`spawn_blocking`) rend un texte. Les balises « non-parole » (`[BLANK_AUDIO]`) sont retirées. Un texte fait de ponctuation seule et les phrases que Whisper invente sur du bruit sont ignorés ([ADR 0008](adr/0008-filtre-hallucinations.md)).
+3. Un détecteur de voix (Silero, [ADR 0014](adr/0014-detecteur-de-voix-silero.md)) cherche d'abord de la parole : aucune → Whisper n'est pas appelé ; sinon seule la zone parlée lui est envoyée. Whisper (`spawn_blocking`) rend un texte. Les balises « non-parole » (`[BLANK_AUDIO]`) sont retirées. Un texte fait de ponctuation seule et les phrases que Whisper invente sur du bruit sont ignorés ([ADR 0008](adr/0008-filtre-hallucinations.md)).
 4. Le texte est corrigé par morceaux d'environ 350 caractères. Un morceau qui revient vide ou plus court de plus de 10 % garde ses mots bruts ([ADR 0005](adr/0005-correction-par-morceaux.md)).
 5. Les snippets sont appliqués, le résultat est enregistré dans l'historique, puis tapé (ou écrit dans le bloc-notes).
 6. Les noms et sigles trouvés dans le texte sont ajoutés à `vocab.txt`.

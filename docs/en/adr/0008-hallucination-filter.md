@@ -20,6 +20,6 @@ The `application/hallucination.rs` module decides:
 ## Consequences
 
 - The same words said at normal volume pass ("Merci.", "Thank you.").
-- Limit: a very quiet voice saying exactly "merci" is dropped. A voice activity detector (Silero) would avoid it; it is on the to-do list.
+- Limit: a very quiet voice saying exactly "merci" is dropped. **Lifted by ADR 0014** (Silero voice detector) when the detector is present.
 - The list needs upkeep: `tests/e2e_models.rs` replays real noise and prints any new phrase after a model change.
 - Accents and capitals are handled ("Merci À Tous"), checked by a test.

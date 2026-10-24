@@ -18,11 +18,12 @@ Un build CUDA prend environ 11 minutes la première fois (deux copies des noyaux
 |----------|-------------------|---------|
 | `cargo test --lib` | Tests unitaires : lecture de la config, snippets, filtres, calculs mémoire, touches, historique, redémarrage | rien |
 | `cargo test --test config_load --test pipeline --test hallucinations --test french` | Vrais adaptateurs avec faux micro, faux clavier et faux Whisper : fichier de config, chaîne de dictée complète, cas d'hallucination, accents et notifications en français | rien |
-| `PLUME_TEST_GGML=… PLUME_TEST_GGUF=… cargo test --release --test e2e_models -- --ignored` | Vrais Whisper et Qwen dans un processus, vrai bruit, silence | un modèle ggml et `model.gguf` |
+| `PLUME_TEST_GGML=… PLUME_TEST_GGUF=… [PLUME_TEST_VAD=…] cargo test --release --test e2e_models -- --ignored` | Vrais Whisper et Qwen dans un processus, bruit, silence. Avec `PLUME_TEST_VAD` (le fichier Silero) le bruit ne doit produire aucun texte | un modèle ggml, `model.gguf`, et si possible le détecteur de voix |
 | `… cargo test --release --test e2e_french -- --ignored` | Compréhension du français parlé par Whisper (langue forcée et détectée) et par le LLM | idem |
+| `PLUME_TEST_GGUF=… cargo test --release --test e2e_llm_eval -- --ignored --nocapture` | Note un LLM de correction sur 12 cas français (réponses vides, mots changés, phrases bien formées). Réussit pour Qwen3-0.6B, échoue pour le 1,7B | `model.gguf` |
 | `PLUME_TEST_GGML=… cargo test --release --lib -- --ignored` | La RAM est libérée au déchargement et restaurée au préchauffage | un modèle ggml |
 
-Ajoutez `--features cuda` pour lancer les trois derniers sur le GPU. Les tests avec vrais modèles attrapent ce que la compilation ne voit pas : un conflit de symboles entre les deux copies de ggml ne plante qu'à l'exécution.
+Ajoutez `--features cuda` pour lancer ceux qui utilisent de vrais modèles sur le GPU. Les tests avec vrais modèles attrapent ce que la compilation ne voit pas : un conflit de symboles entre les deux copies de ggml ne plante qu'à l'exécution.
 
 Fixtures : `tests/fixtures/jfk.wav` (discours du domaine public) et `tests/fixtures/fr/*.wav` (six phrases françaises produites avec la voix Piper `fr_FR-siwis-medium` ; les textes de référence sont dans `tests/common/mod.rs`).
 
