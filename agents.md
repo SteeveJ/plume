@@ -8,7 +8,7 @@ Machine de développement : Linux, session **COSMIC (Wayland)**, RTX 5080 16 Go,
 1. **Public visé : tout le monde, pas seulement les développeurs.** L'auteur est développeur, ce n'est pas la cible. Ne jamais écarter une fonctionnalité parce qu'elle serait « peu utile pour un outil de développeur » (exemple : le Feature Tour a été rouvert pour cette raison).
 2. **Les commentaires du code sont en anglais** : commentaires `//`, `///`, `//!`, commentaires de tests, de scripts de build (`vendor/whisper-rs-sys/build.rs`), de `Cargo.toml`, de `.cargo/config.toml` et du fichier `src/default_vocab.txt`. Le texte affiché à l'utilisateur n'est pas un commentaire : notifications et fenêtre de réglages passent par `t(en, fr, lang)` et existent en anglais et en français. `agents.md` et `todo.md` restent en français (documents de travail).
 3. **Documentation bilingue** : `README.md` (EN) et `README.fr.md` (FR), `docs/en/` et `docs/fr/`, ADR dans les deux langues (même numéro, liens croisés). Toute modification d'un côté se répercute de l'autre.
-4. **Application indépendante, prête à l'emploi : zéro dépendance externe à l'exécution.** L'utilisateur installe le binaire et ça marche, sans `apt install` ni `dnf install`. Préférer une crate Rust pure ou une bibliothèque compilée et liée statiquement ; les modèles et assets sont embarqués ou téléchargés par Plume. Une fonctionnalité qui exige une bibliothèque système est une feature Cargo désactivée par défaut, qui dégrade gracieusement. Avant d'ajouter une dépendance : vérifier qu'elle se compile et se lie sans rien d'installé côté utilisateur. **État réel au 2026-10-25 : cette règle n'est PAS encore respectée.** `libgomp` a été supprimée (llama.cpp sans OpenMP), mais le binaire lie encore GTK4 (+ ~100 bibliothèques), libdbus, libasound et libsqlite3 (voir `todo.md`, section « prête à l'emploi »). Ne jamais présenter ces bibliothèques comme acceptables dans la doc ; la matrice de distributions (`ldd_missing`) doit finir par passer sans aucun paquet d'exécution.
+4. **Application indépendante, prête à l'emploi : zéro dépendance externe à l'exécution.** L'utilisateur installe le binaire et ça marche, sans `apt install` ni `dnf install`. Préférer une crate Rust pure ou une bibliothèque compilée et liée statiquement ; les modèles et assets sont embarqués ou téléchargés par Plume. Une fonctionnalité qui exige une bibliothèque système est une feature Cargo désactivée par défaut, qui dégrade gracieusement. Avant d'ajouter une dépendance : vérifier qu'elle se compile et se lie sans rien d'installé côté utilisateur. **État réel au 2026-10-25 : cette règle n'est PAS encore respectée.** `libgomp` a été supprimée (llama.cpp sans OpenMP), mais le binaire lie encore GTK4 (+ ~100 bibliothèques), libdbus, libasound et libsqlite3 (historique et plan : ADR 0017 ; tâches : `todo.md`, section « prête à l'emploi »). Ne jamais présenter ces bibliothèques comme acceptables dans la doc ; la matrice de distributions (`ldd_missing`) doit finir par passer sans aucun paquet d'exécution.
 5. **Un test par bug réel**, et on vérifie qu'il échoue quand on réintroduit le bug (mutation à la main). Chaque chiffre de la doc vient d'une mesure ; ne pas en inventer, les refaire si le matériel ou les modèles changent.
 6. **Aucune erreur de micro, de modèle ou de réseau n'arrête le démon** : notification avec la cause, puis on attend la touche suivante.
 
@@ -83,7 +83,7 @@ Cargo ne voit pas un changement de `CMAKE_CUDA_ARCHITECTURES` : pour le forcer, 
 - `cargo clippy --all-targets` doit rester propre (hors `tray.rs` et `bench.rs`, anciens).
 
 ## Documentation et décisions
-- Toute décision qui change l'architecture, le build ou le comportement de Whisper/du LLM s'écrit en **ADR** dans `docs/fr/adr/` **et** `docs/en/adr/` (16 à ce jour), avec les index. Ne jamais réécrire un ADR accepté : en ajouter un qui le complète ou le remplace, ou y ajouter une note datée.
+- Toute décision qui change l'architecture, le build ou le comportement de Whisper/du LLM s'écrit en **ADR** dans `docs/fr/adr/` **et** `docs/en/adr/` (17 à ce jour), avec les index. Ne jamais réécrire un ADR accepté : en ajouter un qui le complète ou le remplace, ou y ajouter une note datée.
 - Les guides (`docs/en`, `docs/fr`) : configuration, architecture, développement, dépannage.
 - Fixtures de test : `tests/fixtures/jfk.wav` et `tests/fixtures/fr/*.wav` (voix Piper `fr_FR-siwis-medium`, textes de référence dans `tests/common/mod.rs`).
 
@@ -95,3 +95,13 @@ Python pour Whisper · second exécutable `plume-whisper` · mode commande vocal
 
 ## Piège connu : groupe `input` et systemd --user
 Le démon `systemd --user` ne reçoit pas le groupe `input`. `--install` écrit donc `~/.config/autostart/plume.desktop` (XDG autostart, groupes complets) ; le service systemd est secondaire. Pour tester sans reconnexion : lancer `~/.local/bin/plume` depuis un terminal.
+
+## Leçons (erreurs déjà faites, à ne pas refaire)
+- **Ne jamais valider une dépendance après avoir installé ce qu'elle exige.** Le `ldd` de la matrice passait parce que je venais d'installer GTK4, ALSA, D-Bus et SQLite dans le conteneur (ADR 0017).
+- **Ne pas supposer le bureau de l'utilisateur** : j'ai raisonné sur GNOME alors que la session est COSMIC (`$XDG_CURRENT_DESKTOP`). Vérifier avant d'écrire une décision (ADR 0015).
+- **Mesurer avant de plafonner ou de couper** : un plafond de 64 tokens a rendu des sorties vides, `set_suppress_nst` a fait écrire « you », la suppression de la réflexion de Qwen3 a rendu le texte inchangé.
+- **Écrire l'attendu d'un test comme le service le vit** : « le LLM ne change jamais un mot » valait sur GPU, pas sur CPU ; le test juge maintenant ce que le service taperait (`fidelity`).
+- **`pkill -f nom-du-script` tue sa propre commande** (le texte de la commande contient le nom) : cibler par PID exact.
+- **Six évaluations de LLM sur CPU en parallèle prennent plus de 20 minutes chacune** : lancer les tests d'utilisation trois distributions à la fois.
+- **Quand l'utilisateur dit « stop », s'arrêter** et ne faire que ce qui est demandé ensuite (todo, notes, commit), sans relancer de tâches.
+- **Tout ce qui est noté dans `todo.md` n'est ni commité ni poussé** (le fichier est dans `.gitignore`) : une décision durable va dans un ADR ou dans `agents.md`.

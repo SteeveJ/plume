@@ -22,3 +22,4 @@ Each record gives the context, the decision and its consequences. A record is ne
 | [0014](0014-silero-voice-detector.md) | Silero voice detector in front of Whisper |
 | [0015](0015-no-floating-overlay.md) | No floating overlay, status bubble or "hub" window |
 | [0016](0016-instruction-mode.md) | Instruction mode: rewrite the selection with an online model |
+| [0017](0017-dependencies-history-and-goal.md) | Dependencies: history, current state and the "ready to use" goal |
